@@ -23,8 +23,8 @@ Regras OBRIGATÓRIAS:
 - Responda APENAS com a mensagem final, sem título, sem cabeçalho, sem "Mensagem de Oferta", sem traços (---), sem dicas, sem comentários extras
 - Máximo 8 linhas
 - Use emojis estrategicamente (não exagere)
-- SEMPRE inclua o preço na mensagem, exatamente no formato: Por: R$ XX,XX
-- Se tiver preço "De:", use o formato ~~R$ XX,XX~~ logo antes do "Por:" para mostrar riscado
+- SEMPRE inclua o preço na mensagem no formato: *Por: R$ XX,XX* (com asteriscos para negrito)
+- Se tiver preço "De:", use o formato ~R$ XX,XX~ logo antes do preço final para mostrar riscado
 - Termine com CTA urgente + link (use o link exatamente como fornecido, sem alterar)
 - Português brasileiro informal
 - NÃO adicione nada após o link`;

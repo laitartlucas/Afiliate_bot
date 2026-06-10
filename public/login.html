@@ -36,8 +36,11 @@
     .logo h1 span { color: #25d366; }
     .logo p { margin-top: 6px; font-size: 0.85rem; color: #555; }
 
+    .field { margin-bottom: 16px; }
+
     label { display: block; font-size: 0.82rem; color: #777; margin-bottom: 8px; font-weight: 500; }
 
+    input[type="text"],
     input[type="password"] {
       width: 100%;
       background: #111;
@@ -50,11 +53,12 @@
       transition: border-color 0.2s;
     }
 
+    input[type="text"]:focus,
     input[type="password"]:focus { border-color: #25d366; }
 
     button {
       width: 100%;
-      margin-top: 20px;
+      margin-top: 8px;
       background: #25d366;
       color: #000;
       border: none;
@@ -86,23 +90,33 @@
   <div class="card">
     <div class="logo">
       <h1>ML <span>Affiliate</span> Bot</h1>
-      <p>Entre com sua senha para continuar</p>
+      <p>Entre com suas credenciais</p>
     </div>
 
-    <label for="password">Senha</label>
-    <input type="password" id="password" placeholder="••••••••" autofocus />
+    <div class="field">
+      <label for="username">Usuário</label>
+      <input type="text" id="username" placeholder="seu-usuario" autofocus autocomplete="username" />
+    </div>
+
+    <div class="field">
+      <label for="password">Senha</label>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+
     <button id="btn">Entrar</button>
-    <div class="error" id="error">Senha incorreta. Tente novamente.</div>
+    <div class="error" id="error"></div>
   </div>
 
   <script>
-    const btn = document.getElementById('btn');
-    const input = document.getElementById('password');
-    const error = document.getElementById('error');
+    const btn      = document.getElementById('btn');
+    const userInput = document.getElementById('username');
+    const passInput = document.getElementById('password');
+    const error    = document.getElementById('error');
 
     async function login() {
-      const password = input.value.trim();
-      if (!password) return;
+      const username = userInput.value.trim();
+      const password = passInput.value.trim();
+      if (!username || !password) return;
 
       btn.disabled = true;
       btn.textContent = 'Entrando...';
@@ -112,15 +126,18 @@
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ username, password }),
         });
 
+        const data = await res.json();
+
         if (res.ok) {
-          window.location.href = '/';
+          window.location.href = data.redirect || '/';
         } else {
+          error.textContent = data.error || 'Credenciais inválidas.';
           error.style.display = 'block';
-          input.value = '';
-          input.focus();
+          passInput.value = '';
+          passInput.focus();
         }
       } catch {
         error.textContent = 'Erro de conexão com o servidor.';
@@ -132,7 +149,8 @@
     }
 
     btn.addEventListener('click', login);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+    passInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+    userInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') passInput.focus(); });
   </script>
 </body>
 </html>

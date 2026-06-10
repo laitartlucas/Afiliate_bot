@@ -1,31 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 
-const FILE = path.join(__dirname, '../data/settings.json');
+const DATA_DIR = path.join(__dirname, '../data');
 
-function load() {
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); }
+function getFile(userId) {
+  return path.join(DATA_DIR, `settings-${userId}.json`);
+}
+
+function load(userId) {
+  try { return JSON.parse(fs.readFileSync(getFile(userId), 'utf8')); }
   catch { return {}; }
 }
 
-function get(key) {
-  return load()[key] ?? process.env[key] ?? null;
+function get(key, userId) {
+  return load(userId)[key] ?? null;
 }
 
-function set(key, value) {
-  const data = load();
+function set(key, value, userId) {
+  const data = load(userId);
   data[key] = value;
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
-  process.env[key] = value;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(getFile(userId), JSON.stringify(data, null, 2));
 }
 
-// Apply saved settings to env on startup
-function applyToEnv() {
-  const data = load();
-  for (const [k, v] of Object.entries(data)) {
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
-
-module.exports = { get, set, applyToEnv };
+module.exports = { get, set };

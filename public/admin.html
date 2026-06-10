@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — ML Affiliate Bot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d0d0d;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px 60px;
+    }
+
+    header {
+      width: 100%;
+      max-width: 720px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+
+    header h1 { font-size: 1.4rem; font-weight: 700; color: #fff; }
+    header h1 span { color: #25d366; }
+
+    .logout-btn {
+      background: none;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      color: #666;
+      padding: 7px 14px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .logout-btn:hover { color: #aaa; border-color: #444; }
+
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 28px;
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #555;
+      margin-bottom: 20px;
+    }
+
+    /* ── Form ── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    @media (max-width: 600px) {
+      .form-grid { grid-template-columns: 1fr; }
+    }
+
+    label { display: block; font-size: 0.8rem; color: #777; margin-bottom: 6px; font-weight: 500; }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="date"] {
+      width: 100%;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 11px 14px;
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus { border-color: #25d366; }
+    input::placeholder { color: #3a3a3a; }
+
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cursor: pointer; }
+
+    .btn-primary {
+      background: #25d366;
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      padding: 11px 18px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+      white-space: nowrap;
+    }
+    .btn-primary:hover:not(:disabled) { background: #1ebe5a; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .form-error {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #ef444415;
+      border: 1px solid #ef444430;
+      border-radius: 8px;
+      font-size: 0.83rem;
+      color: #f87171;
+    }
+
+    /* ── Users table ── */
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    thead th {
+      text-align: left;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #555;
+      padding: 0 10px 12px;
+      font-weight: 600;
+    }
+
+    tbody tr {
+      border-top: 1px solid #222;
+    }
+
+    tbody tr:hover { background: #1f1f1f; }
+
+    td {
+      padding: 13px 10px;
+      vertical-align: middle;
+    }
+
+    .username-cell { font-weight: 600; color: #ddd; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-active   { background: #25d36618; color: #25d366; border: 1px solid #25d36630; }
+    .badge-inactive { background: #55555518; color: #777; border: 1px solid #33333330; }
+    .badge-expired  { background: #ef444418; color: #f87171; border: 1px solid #ef444430; }
+    .badge-expiring { background: #f59e0b18; color: #fbbf24; border: 1px solid #f59e0b30; }
+    .badge-forever  { background: #3b82f618; color: #60a5fa; border: 1px solid #3b82f630; }
+
+    /* ── Actions ── */
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .btn-sm {
+      padding: 5px 11px;
+      border-radius: 7px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn-renew  { background: #25d36618; color: #25d366; border-color: #25d36630; }
+    .btn-renew:hover { background: #25d36630; }
+
+    .btn-edit   { background: #3b82f618; color: #60a5fa; border-color: #3b82f630; }
+    .btn-edit:hover { background: #3b82f630; }
+
+    .btn-toggle { background: #55555518; color: #aaa; border-color: #33333330; }
+    .btn-toggle:hover { background: #33333330; }
+
+    .btn-delete { background: #ef444418; color: #f87171; border-color: #ef444430; }
+    .btn-delete:hover { background: #ef444430; }
+
+    /* ── Modal ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000000cc;
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .modal-backdrop.open { display: flex; }
+
+    .modal {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 28px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .modal h2 { font-size: 1.05rem; font-weight: 700; color: #fff; margin-bottom: 20px; }
+
+    .modal .field { margin-bottom: 14px; }
+
+    .modal-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+
+    .btn-cancel {
+      background: none;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #777;
+      padding: 10px 18px;
+      font-size: 0.88rem;
+      cursor: pointer;
+    }
+    .btn-cancel:hover { border-color: #555; color: #aaa; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: #444;
+      font-size: 0.875rem;
+    }
+
+    /* ── Loading ── */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid #2a2a2a;
+      border-top-color: #25d366;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>ML <span>Admin</span></h1>
+  <button class="logout-btn" id="logout-btn">Sair</button>
+</header>
+
+<!-- Create user card -->
+<div class="card">
+  <div class="card-title">Novo Usuário</div>
+  <div class="form-grid">
+    <div>
+      <label for="new-username">Usuário</label>
+      <input type="text" id="new-username" placeholder="joao123" autocomplete="off" />
+    </div>
+    <div>
+      <label for="new-password">Senha</label>
+      <input type="password" id="new-password" placeholder="••••••••" autocomplete="new-password" />
+    </div>
+    <div>
+      <label for="new-expires">Assinatura até</label>
+      <input type="date" id="new-expires" />
+    </div>
+    <div>
+      <button class="btn-primary" id="create-btn">Criar</button>
+    </div>
+  </div>
+  <div class="form-error" id="form-error"></div>
+</div>
+
+<!-- Users list card -->
+<div class="card">
+  <div class="card-title">Usuários</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Usuário</th>
+          <th>Assinatura</th>
+          <th>Status</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="users-body">
+        <tr><td colspan="4" class="empty"><div class="spinner"></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Edit modal -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <h2 id="modal-title">Editar usuário</h2>
+    <input type="hidden" id="edit-id" />
+
+    <div class="field">
+      <label for="edit-expires">Nova data de vencimento</label>
+      <input type="date" id="edit-expires" />
+    </div>
+    <div class="field">
+      <label for="edit-password">Nova senha <span style="color:#555;font-weight:400">(deixe em branco para não alterar)</span></label>
+      <input type="password" id="edit-password" placeholder="••••••••" autocomplete="new-password" />
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" id="modal-cancel">Cancelar</button>
+      <button class="btn-primary" id="modal-save">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function subBadge(user) {
+    if (!user.active) return '<span class="badge badge-inactive">Inativo</span>';
+    if (!user.subscription_expires_at) return '<span class="badge badge-forever">Sem vencimento</span>';
+    const exp = new Date(user.subscription_expires_at);
+    const now = new Date();
+    const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+    if (exp <= now) return `<span class="badge badge-expired">Expirou ${formatDate(user.subscription_expires_at)}</span>`;
+    if (diffDays <= 7) return `<span class="badge badge-expiring">Expira em ${diffDays}d</span>`;
+    return `<span class="badge badge-active">Até ${formatDate(user.subscription_expires_at)}</span>`;
+  }
+
+  function statusBadge(user) {
+    return user.active
+      ? '<span class="badge badge-active">Ativo</span>'
+      : '<span class="badge badge-inactive">Inativo</span>';
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('T')[0].split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  function todayPlus(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+  }
+
+  // ── Load users ────────────────────────────────────────────────────────────
+  async function loadUsers() {
+    const res = await fetch('/api/admin/users');
+    if (res.status === 401 || res.status === 403) { window.location.href = '/login'; return; }
+    const users = await res.json();
+    renderUsers(users);
+  }
+
+  function renderUsers(users) {
+    const tbody = document.getElementById('users-body');
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">Nenhum usuário cadastrado ainda.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = users.map((u) => `
+      <tr data-id="${u.id}">
+        <td class="username-cell">${esc(u.username)}</td>
+        <td>${subBadge(u)}</td>
+        <td>${statusBadge(u)}</td>
+        <td>
+          <div class="actions">
+            <button class="btn-sm btn-renew"  onclick="renew(${u.id})">+30 dias</button>
+            <button class="btn-sm btn-edit"   onclick="openEdit(${u.id}, '${u.username}', '${u.subscription_expires_at || ''}')">Editar</button>
+            <button class="btn-sm btn-toggle" onclick="toggleActive(${u.id}, ${u.active})">${u.active ? 'Desativar' : 'Ativar'}</button>
+            <button class="btn-sm btn-delete" onclick="deleteUser(${u.id}, '${esc(u.username)}')">Excluir</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function esc(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Create user ───────────────────────────────────────────────────────────
+  document.getElementById('create-btn').addEventListener('click', async () => {
+    const username = document.getElementById('new-username').value.trim();
+    const password = document.getElementById('new-password').value.trim();
+    const expiresAt = document.getElementById('new-expires').value || null;
+    const errEl = document.getElementById('form-error');
+
+    errEl.style.display = 'none';
+    if (!username || !password) { errEl.textContent = 'Usuário e senha são obrigatórios.'; errEl.style.display = 'block'; return; }
+
+    const btn = document.getElementById('create-btn');
+    btn.disabled = true;
+    btn.textContent = 'Criando...';
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, expiresAt }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        document.getElementById('new-username').value = '';
+        document.getElementById('new-password').value = '';
+        document.getElementById('new-expires').value = '';
+        await loadUsers();
+      } else {
+        errEl.textContent = data.error || 'Erro ao criar usuário.';
+        errEl.style.display = 'block';
+      }
+    } catch {
+      errEl.textContent = 'Erro de conexão.';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Criar';
+    }
+  });
+
+  // ── Renew +30 days ────────────────────────────────────────────────────────
+  async function renew(id) {
+    const users = await fetch('/api/admin/users').then(r => r.json());
+    const user = users.find(u => u.id === id);
+    if (!user) return;
+
+    // Start from today or current expiry, whichever is later
+    const base = user.subscription_expires_at && new Date(user.subscription_expires_at) > new Date()
+      ? new Date(user.subscription_expires_at)
+      : new Date();
+    base.setDate(base.getDate() + 30);
+    const newExpiry = base.toISOString().split('T')[0];
+
+    await fetch(`/api/admin/users/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresAt: newExpiry }),
+    });
+    await loadUsers();
+  }
+
+  // ── Toggle active ─────────────────────────────────────────────────────────
+  async function toggleActive(id, currentActive) {
+    await fetch(`/api/admin/users/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !currentActive }),
+    });
+    await loadUsers();
+  }
+
+  // ── Delete user ───────────────────────────────────────────────────────────
+  async function deleteUser(id, username) {
+    if (!confirm(`Excluir o usuário "${username}"? Esta ação não pode ser desfeita.`)) return;
+    await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+    await loadUsers();
+  }
+
+  // ── Edit modal ────────────────────────────────────────────────────────────
+  function openEdit(id, username, expiresAt) {
+    document.getElementById('edit-id').value = id;
+    document.getElementById('modal-title').textContent = `Editar: ${username}`;
+    document.getElementById('edit-expires').value = expiresAt ? expiresAt.split('T')[0] : '';
+    document.getElementById('edit-password').value = '';
+    document.getElementById('modal').classList.add('open');
+  }
+
+  document.getElementById('modal-cancel').addEventListener('click', () => {
+    document.getElementById('modal').classList.remove('open');
+  });
+
+  document.getElementById('modal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('modal')) document.getElementById('modal').classList.remove('open');
+  });
+
+  document.getElementById('modal-save').addEventListener('click', async () => {
+    const id = document.getElementById('edit-id').value;
+    const expiresAt = document.getElementById('edit-expires').value || null;
+    const password = document.getElementById('edit-password').value.trim() || undefined;
+
+    const btn = document.getElementById('modal-save');
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+
+    try {
+      await fetch(`/api/admin/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresAt, ...(password ? { password } : {}) }),
+      });
+      document.getElementById('modal').classList.remove('open');
+      await loadUsers();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Salvar';
+    }
+  });
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    window.location.href = '/login';
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  loadUsers();
+</script>
+
+</body>
+</html>

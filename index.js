@@ -32,7 +32,7 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 // ── Middleware ───────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
-  if (req.session?.userId != null) return next();
+  if (req.session?.isAdmin || req.session?.userId != null) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Não autenticado' });
   res.redirect('/login');
 }

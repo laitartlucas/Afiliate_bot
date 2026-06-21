@@ -1,5 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -139,6 +140,98 @@ async function scrapeProduct(originalUrl) {
   return { title, currentPrice, originalPrice, discountPercent, imageUrl, features: features.slice(0, 8), url: originalUrl };
 }
 
+// ── Shopee ───────────────────────────────────────────────────────────────────
+// Shopee bloqueia requisições HTTP simples (axios/cheerio), por isso usamos um
+// navegador headless real para renderizar a página antes de extrair os dados.
+
+let shopeeBrowser = null;
+
+async function getShopeeBrowser() {
+  if (shopeeBrowser) return shopeeBrowser;
+  shopeeBrowser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  shopeeBrowser.on('disconnected', () => { shopeeBrowser = null; });
+  return shopeeBrowser;
+}
+
+function parseShopeePriceText(text) {
+  if (!text) return null;
+  const match = text.replace(/\s/g, '').match(/R\$\s*([\d.,]+)/i);
+  if (!match) return null;
+  return parsePrice(match[1]);
+}
+
+async function scrapeShopeeProduct(originalUrl) {
+  const url = await resolveUrl(originalUrl);
+  console.log(`[SCRAPER:Shopee] URL final: ${url}`);
+
+  const result = {
+    title: null, currentPrice: null, originalPrice: null,
+    discountPercent: null, imageUrl: null, features: [],
+    url: originalUrl, scraped: false,
+  };
+
+  let page;
+  try {
+    const browser = await getShopeeBrowser();
+    page = await browser.newPage();
+    await page.setUserAgent(HEADERS['User-Agent']);
+    await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
+    await page.setViewport({ width: 1280, height: 900 });
+
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.waitForSelector('h1, [class*="price"]', { timeout: 8000 }).catch(() => {});
+
+    const data = await page.evaluate(() => {
+      const ogTitle = document.querySelector('meta[property="og:title"]')?.content || null;
+      const ogImage = document.querySelector('meta[property="og:image"]')?.content || null;
+      const h1Title = document.querySelector('h1')?.innerText?.trim() || null;
+
+      const strikedEl = Array.from(document.querySelectorAll('*')).find((el) => {
+        const style = window.getComputedStyle(el);
+        return style.textDecorationLine?.includes('line-through') && /R\$/.test(el.innerText || '');
+      });
+
+      const bodyText = document.body.innerText || '';
+      const priceMatches = bodyText.match(/R\$\s*[\d.,]+/g) || [];
+
+      const discountMatch = bodyText.match(/-\s*(\d{1,3})\s*%/);
+      const blocked = /página indisponível|page unavailable|verifique que você é humano|complete a verificação/i.test(bodyText);
+
+      return {
+        ogTitle,
+        ogImage,
+        h1Title,
+        strikedText: strikedEl ? strikedEl.innerText : null,
+        firstPriceText: priceMatches[0] || null,
+        discountPercent: discountMatch ? parseInt(discountMatch[1], 10) : null,
+        blocked,
+      };
+    });
+
+    result.title = !data.blocked ? (data.h1Title || data.ogTitle || null) : null;
+    result.imageUrl = !data.blocked ? (data.ogImage || null) : null;
+    result.currentPrice = data.blocked ? null : parseShopeePriceText(data.firstPriceText);
+    result.originalPrice = data.blocked ? null : parseShopeePriceText(data.strikedText);
+    result.discountPercent = data.discountPercent
+      || (result.originalPrice && result.currentPrice && result.originalPrice > result.currentPrice
+        ? Math.round((1 - result.currentPrice / result.originalPrice) * 100)
+        : null);
+    result.scraped = !data.blocked && !!(result.title || result.currentPrice || result.imageUrl);
+    if (data.blocked) console.warn('[SCRAPER:Shopee] Página de bloqueio/verificação detectada.');
+
+    console.log(`[SCRAPER:Shopee] Título: "${result.title}" | Preço: ${result.currentPrice} | Imagem: ${result.imageUrl ? 'sim' : 'não'}`);
+  } catch (err) {
+    console.warn('[SCRAPER:Shopee] Falha ao extrair dados automaticamente:', err.message);
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
+
+  return result;
+}
+
 async function downloadImage(url) {
   const res = await axios.get(url, {
     responseType: 'arraybuffer',
@@ -148,4 +241,4 @@ async function downloadImage(url) {
   return Buffer.from(res.data);
 }
 
-module.exports = { scrapeProduct, downloadImage };
+module.exports = { scrapeProduct, scrapeShopeeProduct, downloadImage };

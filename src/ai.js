@@ -15,7 +15,7 @@ async function generateSalesMessage(product, coupon = null) {
 
   const prompt = `Você é especialista em marketing de afiliados brasileiro. Crie uma mensagem de oferta impactante para grupo de WhatsApp.
 
-Produto: ${title || 'Produto Mercado Livre'}
+Produto: ${title || 'Produto'}
 ${priceInfo}${featuresText}
 Link: ${url}
 

@@ -280,6 +280,33 @@
       font-size: 0.82rem;
       color: #25d366;
     }
+
+    /* ── Shopee review form ── */
+    #shopee-review { display: none; margin-top: 18px; }
+
+    .field-row { display: flex; gap: 10px; }
+    .field-row > div { flex: 1; }
+
+    .scrape-warning {
+      display: none;
+      font-size: 0.82rem;
+      color: #fbbf24;
+      background: #f59e0b12;
+      border: 1px solid #f59e0b30;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-top: 14px;
+      line-height: 1.5;
+    }
+
+    #shopee-img-preview {
+      display: none;
+      max-width: 140px;
+      max-height: 140px;
+      border-radius: 8px;
+      margin-top: 10px;
+      border: 1px solid #2a2a2a;
+    }
   </style>
 </head>
 <body>
@@ -362,6 +389,65 @@
   </div>
 </div>
 
+<!-- Shopee card -->
+<div class="card" id="shopee-card" style="display:none">
+  <div class="card-title">Enviar Oferta — Shopee</div>
+
+  <label for="shopee-url-input">Link de afiliado da Shopee</label>
+  <div class="input-row">
+    <input type="text" id="shopee-url-input" placeholder="https://shopee.com.br/... ou s.shopee.com.br/..." autocomplete="off" />
+    <button class="btn-primary" id="shopee-analyze-btn">Analisar</button>
+  </div>
+
+  <div class="loader" id="shopee-loader">
+    <div class="spinner"></div>
+    <span id="shopee-step-label">Analisando produto...</span>
+  </div>
+
+  <div class="scrape-warning" id="shopee-warning">
+    ⚠️ Não conseguimos identificar os dados automaticamente. Preencha os campos abaixo manualmente antes de enviar.
+  </div>
+
+  <div id="shopee-review">
+    <label for="shopee-title-input" style="margin-top:14px">Título do produto</label>
+    <input type="text" id="shopee-title-input" placeholder="Nome do produto" autocomplete="off" />
+
+    <div class="field-row" style="margin-top:14px">
+      <div>
+        <label for="shopee-price-input">Preço atual (R$)</label>
+        <input type="text" id="shopee-price-input" placeholder="Ex: 99.90" autocomplete="off" />
+      </div>
+      <div>
+        <label for="shopee-original-price-input">Preço original <span style="color:#444;font-weight:400">(opcional)</span></label>
+        <input type="text" id="shopee-original-price-input" placeholder="Ex: 149.90" autocomplete="off" />
+      </div>
+    </div>
+
+    <label for="shopee-image-input" style="margin-top:14px">URL da imagem <span style="color:#444;font-weight:400">(opcional)</span></label>
+    <input type="text" id="shopee-image-input" placeholder="https://..." autocomplete="off" />
+    <img id="shopee-img-preview" alt="Pré-visualização" />
+
+    <label for="shopee-coupon-input" style="margin-top:14px">Cupom <span style="color:#444;font-weight:400">(opcional)</span></label>
+    <input type="text" id="shopee-coupon-input" placeholder="Ex: SHOPEE10" autocomplete="off" style="text-transform:uppercase" />
+
+    <div class="input-row" style="margin-top:18px">
+      <button class="btn-primary" id="shopee-send-btn" style="flex:1">Enviar para o grupo</button>
+      <button class="btn-outline" id="shopee-cancel-btn">Cancelar</button>
+    </div>
+  </div>
+
+  <div class="loader" id="shopee-send-loader">
+    <div class="spinner"></div>
+    <span>Gerando descrição e enviando...</span>
+  </div>
+
+  <div id="shopee-result" style="display:none; margin-top:20px">
+    <div class="result-label">Mensagem gerada</div>
+    <div class="result-box" id="shopee-result-box"></div>
+    <div class="sent-badge" id="shopee-sent-badge">✓ Enviado para o grupo</div>
+  </div>
+</div>
+
 <script>
   // ── Elements ─────────────────────────────────────────────────────────────
   const dot         = document.getElementById('dot');
@@ -371,6 +457,7 @@
   const qrWrap      = document.getElementById('qr-wrap');
   const qrImg       = document.getElementById('qr-img');
   const sendCard    = document.getElementById('send-card');
+  const shopeeCard  = document.getElementById('shopee-card');
   const groupInput  = document.getElementById('group-input');
   const saveBtn     = document.getElementById('save-btn');
   const saveFb      = document.getElementById('save-feedback');
@@ -457,6 +544,7 @@
     statusText.textContent = 'WhatsApp conectado';
     qrSection.style.display = 'none';
     sendCard.style.display = 'block';
+    shopeeCard.style.display = 'block';
     if (subscriptionActive) urlInput.focus();
   }
 
@@ -557,6 +645,147 @@
   });
 
   urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendBtn.click(); });
+
+  // ── Shopee ────────────────────────────────────────────────────────────────
+  const shopeeUrlInput      = document.getElementById('shopee-url-input');
+  const shopeeAnalyzeBtn    = document.getElementById('shopee-analyze-btn');
+  const shopeeLoader        = document.getElementById('shopee-loader');
+  const shopeeWarning       = document.getElementById('shopee-warning');
+  const shopeeReview        = document.getElementById('shopee-review');
+  const shopeeTitleInput    = document.getElementById('shopee-title-input');
+  const shopeePriceInput    = document.getElementById('shopee-price-input');
+  const shopeeOrigPriceInput= document.getElementById('shopee-original-price-input');
+  const shopeeImageInput    = document.getElementById('shopee-image-input');
+  const shopeeImgPreview    = document.getElementById('shopee-img-preview');
+  const shopeeCouponInput   = document.getElementById('shopee-coupon-input');
+  const shopeeSendBtn       = document.getElementById('shopee-send-btn');
+  const shopeeCancelBtn     = document.getElementById('shopee-cancel-btn');
+  const shopeeSendLoader    = document.getElementById('shopee-send-loader');
+  const shopeeResultDiv     = document.getElementById('shopee-result');
+  const shopeeResultBox     = document.getElementById('shopee-result-box');
+  const shopeeSentBadge     = document.getElementById('shopee-sent-badge');
+
+  let shopeeAffiliateUrl = '';
+
+  function updateShopeeImgPreview() {
+    const src = shopeeImageInput.value.trim();
+    if (src) { shopeeImgPreview.src = src; shopeeImgPreview.style.display = 'block'; }
+    else { shopeeImgPreview.style.display = 'none'; }
+  }
+  shopeeImageInput.addEventListener('input', updateShopeeImgPreview);
+
+  function resetShopeeForm() {
+    shopeeReview.style.display = 'none';
+    shopeeWarning.style.display = 'none';
+    shopeeResultDiv.style.display = 'none';
+    shopeeTitleInput.value = '';
+    shopeePriceInput.value = '';
+    shopeeOrigPriceInput.value = '';
+    shopeeImageInput.value = '';
+    shopeeCouponInput.value = '';
+    shopeeImgPreview.style.display = 'none';
+    shopeeAffiliateUrl = '';
+  }
+
+  shopeeAnalyzeBtn.addEventListener('click', async () => {
+    const url = shopeeUrlInput.value.trim();
+    if (!url) return;
+
+    shopeeAnalyzeBtn.disabled = true;
+    shopeeLoader.style.display = 'flex';
+    shopeeReview.style.display = 'none';
+    shopeeWarning.style.display = 'none';
+    shopeeResultDiv.style.display = 'none';
+
+    try {
+      const res = await fetch('/api/shopee/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        const p = data.product;
+        shopeeAffiliateUrl = p.url || url;
+        shopeeTitleInput.value = p.title || '';
+        shopeePriceInput.value = p.currentPrice != null ? p.currentPrice : '';
+        shopeeOrigPriceInput.value = p.originalPrice != null ? p.originalPrice : '';
+        shopeeImageInput.value = p.imageUrl || '';
+        updateShopeeImgPreview();
+        if (!p.scraped) shopeeWarning.style.display = 'block';
+        shopeeReview.style.display = 'block';
+      } else {
+        shopeeAffiliateUrl = url;
+        shopeeWarning.style.display = 'block';
+        shopeeReview.style.display = 'block';
+      }
+    } catch {
+      shopeeAffiliateUrl = url;
+      shopeeWarning.style.display = 'block';
+      shopeeReview.style.display = 'block';
+    } finally {
+      shopeeLoader.style.display = 'none';
+      shopeeAnalyzeBtn.disabled = false;
+    }
+  });
+
+  shopeeCancelBtn.addEventListener('click', () => {
+    resetShopeeForm();
+    shopeeUrlInput.value = '';
+  });
+
+  shopeeSendBtn.addEventListener('click', async () => {
+    if (!shopeeAffiliateUrl) return;
+
+    shopeeSendBtn.disabled = true;
+    shopeeSendLoader.style.display = 'flex';
+    shopeeResultDiv.style.display = 'none';
+    shopeeSentBadge.style.display = 'none';
+
+    try {
+      const res = await fetch('/api/shopee/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: shopeeAffiliateUrl,
+          title: shopeeTitleInput.value.trim(),
+          currentPrice: shopeePriceInput.value.trim(),
+          originalPrice: shopeeOrigPriceInput.value.trim(),
+          imageUrl: shopeeImageInput.value.trim(),
+          coupon: shopeeCouponInput.value.trim().toUpperCase() || null,
+        }),
+      });
+      const data = await res.json();
+
+      shopeeResultDiv.style.display = 'block';
+
+      if (data.success) {
+        shopeeUrlInput.value = '';
+        resetShopeeForm();
+        shopeeResultBox.className = 'result-box success';
+        shopeeResultBox.textContent = data.message;
+        shopeeSentBadge.style.display = 'flex';
+        shopeeResultDiv.style.display = 'block';
+      } else if (res.status === 402) {
+        shopeeResultBox.className = 'result-box error';
+        shopeeResultBox.textContent = data.message || 'Assinatura expirada. Entre em contato para renovar.';
+        shopeeSendBtn.disabled = true;
+      } else {
+        shopeeResultBox.className = 'result-box error';
+        shopeeResultBox.textContent = data.error || 'Erro desconhecido';
+      }
+    } catch {
+      shopeeResultDiv.style.display = 'block';
+      shopeeResultBox.className = 'result-box error';
+      shopeeResultBox.textContent = 'Erro de conexão com o servidor.';
+    } finally {
+      shopeeSendLoader.style.display = 'none';
+      if (subscriptionActive) shopeeSendBtn.disabled = false;
+    }
+  });
+
+  shopeeUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') shopeeAnalyzeBtn.click(); });
 
   // ── Logout ────────────────────────────────────────────────────────────────
   logoutBtn.addEventListener('click', async () => {

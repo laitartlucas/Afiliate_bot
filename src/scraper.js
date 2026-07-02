@@ -140,21 +140,24 @@ async function scrapeProduct(originalUrl) {
   return { title, currentPrice, originalPrice, discountPercent, imageUrl, features: features.slice(0, 8), url: originalUrl };
 }
 
-// ── Shopee ───────────────────────────────────────────────────────────────────
-// Shopee bloqueia requisições HTTP simples (axios/cheerio), por isso usamos um
-// navegador headless real para renderizar a página antes de extrair os dados.
+// ── Navegador headless compartilhado ────────────────────────────────────────
+// Shopee e Amazon bloqueiam requisições HTTP simples (axios/cheerio) com
+// páginas de verificação/captcha, por isso usamos um navegador headless real
+// para renderizar a página antes de extrair os dados.
 
-let shopeeBrowser = null;
+let sharedBrowser = null;
 
-async function getShopeeBrowser() {
-  if (shopeeBrowser) return shopeeBrowser;
-  shopeeBrowser = await puppeteer.launch({
+async function getBrowser() {
+  if (sharedBrowser) return sharedBrowser;
+  sharedBrowser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
-  shopeeBrowser.on('disconnected', () => { shopeeBrowser = null; });
-  return shopeeBrowser;
+  sharedBrowser.on('disconnected', () => { sharedBrowser = null; });
+  return sharedBrowser;
 }
+
+// ── Shopee ───────────────────────────────────────────────────────────────────
 
 function parseShopeePriceText(text) {
   if (!text) return null;
@@ -175,7 +178,7 @@ async function scrapeShopeeProduct(originalUrl) {
 
   let page;
   try {
-    const browser = await getShopeeBrowser();
+    const browser = await getBrowser();
     page = await browser.newPage();
     await page.setUserAgent(HEADERS['User-Agent']);
     await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
@@ -185,6 +188,12 @@ async function scrapeShopeeProduct(originalUrl) {
     await page.waitForSelector('h1, [class*="price"]', { timeout: 8000 }).catch(() => {});
 
     const data = await page.evaluate(() => {
+      // Seletores específicos da página de produto da Shopee
+      const titleEl = document.querySelector('h1.vR6K3w');
+      const currentPriceEl = document.querySelector('.jRlVo0 .IZPeQz, .IZPeQz');
+      const originalPriceEl = document.querySelector('.jRlVo0 .ZA5sW5, .ZA5sW5');
+      const discountEl = document.querySelector('.jRlVo0 .vms4_3, .vms4_3');
+
       const ogTitle = document.querySelector('meta[property="og:title"]')?.content || null;
       const ogImage = document.querySelector('meta[property="og:image"]')?.content || null;
       const h1Title = document.querySelector('h1')?.innerText?.trim() || null;
@@ -204,6 +213,10 @@ async function scrapeShopeeProduct(originalUrl) {
         ogTitle,
         ogImage,
         h1Title,
+        titleText: titleEl ? titleEl.innerText.trim() : null,
+        currentPriceText: currentPriceEl ? currentPriceEl.innerText.trim() : null,
+        originalPriceText: originalPriceEl ? originalPriceEl.innerText.trim() : null,
+        discountText: discountEl ? discountEl.innerText.trim() : null,
         strikedText: strikedEl ? strikedEl.innerText : null,
         firstPriceText: priceMatches[0] || null,
         discountPercent: discountMatch ? parseInt(discountMatch[1], 10) : null,
@@ -211,11 +224,14 @@ async function scrapeShopeeProduct(originalUrl) {
       };
     });
 
-    result.title = !data.blocked ? (data.h1Title || data.ogTitle || null) : null;
+    result.title = data.blocked ? null : (data.titleText || data.h1Title || data.ogTitle || null);
     result.imageUrl = !data.blocked ? (data.ogImage || null) : null;
-    result.currentPrice = data.blocked ? null : parseShopeePriceText(data.firstPriceText);
-    result.originalPrice = data.blocked ? null : parseShopeePriceText(data.strikedText);
-    result.discountPercent = data.discountPercent
+    result.currentPrice = data.blocked ? null : (parseShopeePriceText(data.currentPriceText) || parseShopeePriceText(data.firstPriceText));
+    result.originalPrice = data.blocked ? null : (parseShopeePriceText(data.originalPriceText) || parseShopeePriceText(data.strikedText));
+
+    const discountMatch = (data.discountText || '').match(/(\d{1,3})/);
+    result.discountPercent = (discountMatch ? parseInt(discountMatch[1], 10) : null)
+      || data.discountPercent
       || (result.originalPrice && result.currentPrice && result.originalPrice > result.currentPrice
         ? Math.round((1 - result.currentPrice / result.originalPrice) * 100)
         : null);
@@ -232,6 +248,112 @@ async function scrapeShopeeProduct(originalUrl) {
   return result;
 }
 
+// ── Amazon ───────────────────────────────────────────────────────────────────
+// Amazon bloqueia requisições HTTP simples com uma página de validação
+// (opfcaptcha), por isso também usamos o navegador headless compartilhado.
+
+function parseAmazonPriceText(text) {
+  if (!text) return null;
+  const match = text.match(/([\d.,]+)/);
+  return match ? parsePrice(match[1]) : null;
+}
+
+async function scrapeAmazonProduct(originalUrl) {
+  const url = await resolveUrl(originalUrl);
+  console.log(`[SCRAPER:Amazon] URL final: ${url}`);
+
+  const result = {
+    title: null, currentPrice: null, originalPrice: null,
+    discountPercent: null, imageUrl: null, features: [],
+    url: originalUrl, scraped: false,
+  };
+
+  let page;
+  try {
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.setUserAgent(HEADERS['User-Agent']);
+    await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
+    await page.setViewport({ width: 1280, height: 900 });
+
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.waitForSelector('#productTitle, .apex-pricetopay-value', { timeout: 8000 }).catch(() => {});
+
+    const data = await page.evaluate(() => {
+      // Título
+      const titleEl = document.querySelector('#productTitle');
+
+      // Preço atual — bloco "priceToPay" (whole + fraction)
+      const priceToPayEl = document.querySelector('.priceToPay, .apex-pricetopay-value');
+      const wholeEl = priceToPayEl?.querySelector('.a-price-whole');
+      const fractionEl = priceToPayEl?.querySelector('.a-price-fraction');
+
+      // Desconto — "apex-savings-percentage" (ex.: -61%)
+      const discountEl = document.querySelector('.apex-savings-percentage, .savingsPercentage');
+
+      // Preço original/riscado — tentativa via seletores comuns de "preço de lista"
+      // (exclui o bloco de preço por unidade, ex.: "R$ X / l", que também usa a classe a-text-price)
+      const basisEl = document.querySelector(
+        '.basisPrice .a-offscreen, span[data-a-strike="true"] .a-offscreen, .a-text-price:not(.apex-priceperunit-value):not([class*="priceperunit"]) .a-offscreen'
+      );
+
+      const ogTitle = document.querySelector('meta[property="og:title"]')?.content || null;
+      const ogImage = document.querySelector('meta[property="og:image"]')?.content || null;
+      const landingImg = document.querySelector('#landingImage');
+
+      const bodyText = document.body.innerText || '';
+      const blocked = /digite os caracteres|enter the characters|continuar comprando|automated access/i.test(bodyText) && !titleEl;
+
+      const features = Array.from(document.querySelectorAll('#feature-bullets li span.a-list-item'))
+        .map((el) => el.innerText.trim())
+        .filter(Boolean)
+        .slice(0, 8);
+
+      return {
+        titleText: titleEl ? titleEl.innerText.trim() : null,
+        ogTitle,
+        ogImage,
+        wholeText: wholeEl ? wholeEl.innerText.trim() : null,
+        fractionText: fractionEl ? fractionEl.innerText.trim() : null,
+        discountText: discountEl ? discountEl.innerText.trim() : null,
+        basisText: basisEl ? basisEl.innerText.trim() : null,
+        imageUrl: landingImg?.getAttribute('data-old-hires') || landingImg?.getAttribute('src') || null,
+        features,
+        blocked,
+      };
+    });
+
+    result.title = data.blocked ? null : (data.titleText || data.ogTitle || null);
+    result.imageUrl = !data.blocked ? (data.imageUrl || data.ogImage || null) : null;
+    result.features = data.blocked ? [] : data.features;
+
+    if (!data.blocked) {
+      const whole = (data.wholeText || '').replace(/[^\d]/g, '');
+      const fraction = (data.fractionText || '').replace(/[^\d]/g, '');
+      result.currentPrice = whole ? parseFloat(`${whole}.${fraction || '00'}`) : null;
+
+      const discountMatch = (data.discountText || '').match(/(\d{1,3})/);
+      result.discountPercent = discountMatch ? parseInt(discountMatch[1], 10) : null;
+
+      result.originalPrice = parseAmazonPriceText(data.basisText);
+      if (!result.originalPrice && result.currentPrice && result.discountPercent) {
+        result.originalPrice = Math.round((result.currentPrice / (1 - result.discountPercent / 100)) * 100) / 100;
+      }
+    }
+
+    result.scraped = !data.blocked && !!(result.title || result.currentPrice || result.imageUrl);
+    if (data.blocked) console.warn('[SCRAPER:Amazon] Página de verificação/bloqueio detectada.');
+
+    console.log(`[SCRAPER:Amazon] Título: "${result.title}" | Preço: ${result.currentPrice} | Imagem: ${result.imageUrl ? 'sim' : 'não'}`);
+  } catch (err) {
+    console.warn('[SCRAPER:Amazon] Falha ao extrair dados automaticamente:', err.message);
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
+
+  return result;
+}
+
 async function downloadImage(url) {
   const res = await axios.get(url, {
     responseType: 'arraybuffer',
@@ -241,4 +363,4 @@ async function downloadImage(url) {
   return Buffer.from(res.data);
 }
 
-module.exports = { scrapeProduct, scrapeShopeeProduct, downloadImage };
+module.exports = { scrapeProduct, scrapeShopeeProduct, scrapeAmazonProduct, downloadImage };

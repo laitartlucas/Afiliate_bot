@@ -6,7 +6,7 @@ const QRCode = require('qrcode');
 const db = require('./src/database');
 const { get: getSetting, set: setSetting } = require('./src/settings');
 const { initWhatsApp, sendToGroup, isReady, getQR, isInitializing, setGroupName, destroyClient } = require('./src/whatsapp');
-const { scrapeProduct, scrapeShopeeProduct, downloadImage } = require('./src/scraper');
+const { scrapeProduct, scrapeShopeeProduct, scrapeAmazonProduct, downloadImage } = require('./src/scraper');
 const { generateSalesMessage } = require('./src/ai');
 
 const required = ['ANTHROPIC_API_KEY', 'ADMIN_PASSWORD', 'SESSION_SECRET'];
@@ -278,6 +278,60 @@ app.post('/api/shopee/process', requireAuth, requireActiveSubscription, async (r
     res.json({ success: true, message, product });
   } catch (err) {
     console.error(`[SHOPEE:${userId}] Erro:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/amazon/analyze', requireAuth, requireActiveSubscription, async (req, res) => {
+  const userId = req.session.userId;
+  const { url } = req.body;
+  if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
+
+  try {
+    console.log(`[AMAZON:${userId}] Analisando: ${url.trim()}`);
+    const product = await scrapeAmazonProduct(url.trim());
+    res.json({ success: true, product });
+  } catch (err) {
+    console.error(`[AMAZON:${userId}] Erro ao analisar:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/amazon/process', requireAuth, requireActiveSubscription, async (req, res) => {
+  const userId = req.session.userId;
+  const { url, title, currentPrice, originalPrice, discountPercent, imageUrl, coupon } = req.body;
+
+  if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
+  if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
+  if (!getSetting('DEST_GROUP_NAME', userId)) return res.status(400).json({ error: 'Configure o nome do grupo antes de enviar.' });
+
+  const product = {
+    title: title?.trim() || null,
+    currentPrice: currentPrice !== undefined && currentPrice !== '' ? parseFloat(currentPrice) : null,
+    originalPrice: originalPrice !== undefined && originalPrice !== '' ? parseFloat(originalPrice) : null,
+    discountPercent: discountPercent !== undefined && discountPercent !== '' ? parseInt(discountPercent, 10) : null,
+    imageUrl: imageUrl?.trim() || null,
+    features: [],
+    url: url.trim(),
+  };
+
+  try {
+    console.log(`[AMAZON:${userId}] Processando: "${product.title}"`);
+    const message = await generateSalesMessage(product, coupon?.trim().toUpperCase() || null);
+    console.log(`[AMAZON:${userId}] Mensagem gerada`);
+
+    let imageBuffer = null;
+    if (product.imageUrl) {
+      try { imageBuffer = await downloadImage(product.imageUrl); }
+      catch (err) { console.warn(`[AMAZON:${userId}] Imagem não baixada:`, err.message); }
+    }
+
+    await sendToGroup(userId, message, imageBuffer, product.imageUrl);
+    console.log(`[AMAZON:${userId}] Enviado!`);
+
+    res.json({ success: true, message, product });
+  } catch (err) {
+    console.error(`[AMAZON:${userId}] Erro:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });

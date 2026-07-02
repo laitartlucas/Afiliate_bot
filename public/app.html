@@ -228,6 +228,33 @@
       color: #25d366;
       margin-top: 10px;
     }
+    .save-feedback.error { color: #f87171; }
+
+    /* ── Group chips ── */
+    .group-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 20px;
+      padding: 6px 8px 6px 14px;
+      font-size: 0.83rem;
+      color: #ddd;
+    }
+
+    .group-chip button {
+      background: none;
+      border: none;
+      color: #555;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 2px 6px;
+      border-radius: 50%;
+      transition: color 0.2s, background 0.2s;
+    }
+    .group-chip button:hover { color: #f87171; background: #f8717120; }
 
     /* ── Send section ── */
     #send-card { display: none; }
@@ -280,33 +307,6 @@
       font-size: 0.82rem;
       color: #25d366;
     }
-
-    /* ── Shopee review form ── */
-    #shopee-review { display: none; margin-top: 18px; }
-
-    .field-row { display: flex; gap: 10px; }
-    .field-row > div { flex: 1; }
-
-    .scrape-warning {
-      display: none;
-      font-size: 0.82rem;
-      color: #fbbf24;
-      background: #f59e0b12;
-      border: 1px solid #f59e0b30;
-      border-radius: 8px;
-      padding: 10px 14px;
-      margin-top: 14px;
-      line-height: 1.5;
-    }
-
-    #shopee-img-preview, #amazon-img-preview {
-      display: none;
-      max-width: 140px;
-      max-height: 140px;
-      border-radius: 8px;
-      margin-top: 10px;
-      border: 1px solid #2a2a2a;
-    }
   </style>
 </head>
 <body>
@@ -356,12 +356,14 @@
 <div class="card">
   <div class="card-title">Configurações</div>
 
-  <label for="group-input">Nome do grupo de destino</label>
+  <label for="group-input">Grupos de destino <span id="group-count" style="color:#444;font-weight:400"></span></label>
   <div class="input-row">
     <input type="text" id="group-input" placeholder="Ex: Ofertas do Dia" />
-    <button class="btn-outline" id="save-btn">Salvar</button>
+    <button class="btn-outline" id="save-btn">Adicionar</button>
   </div>
-  <div class="save-feedback" id="save-feedback">✓ Grupo salvo com sucesso</div>
+  <div class="save-feedback" id="save-feedback"></div>
+
+  <div id="group-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px"></div>
 </div>
 
 <!-- Send card -->
@@ -396,49 +398,15 @@
   <label for="shopee-url-input">Link de afiliado da Shopee</label>
   <div class="input-row">
     <input type="text" id="shopee-url-input" placeholder="https://shopee.com.br/... ou s.shopee.com.br/..." autocomplete="off" />
-    <button class="btn-primary" id="shopee-analyze-btn">Analisar</button>
+    <button class="btn-primary" id="shopee-send-btn">Enviar</button>
   </div>
+
+  <label for="shopee-coupon-input" style="margin-top:14px">Cupom <span style="color:#444;font-weight:400">(opcional)</span></label>
+  <input type="text" id="shopee-coupon-input" placeholder="Ex: SHOPEE10" autocomplete="off" style="text-transform:uppercase" />
 
   <div class="loader" id="shopee-loader">
     <div class="spinner"></div>
     <span id="shopee-step-label">Analisando produto...</span>
-  </div>
-
-  <div class="scrape-warning" id="shopee-warning">
-    ⚠️ Não conseguimos identificar os dados automaticamente. Preencha os campos abaixo manualmente antes de enviar.
-  </div>
-
-  <div id="shopee-review">
-    <label for="shopee-title-input" style="margin-top:14px">Título do produto</label>
-    <input type="text" id="shopee-title-input" placeholder="Nome do produto" autocomplete="off" />
-
-    <div class="field-row" style="margin-top:14px">
-      <div>
-        <label for="shopee-price-input">Preço atual (R$)</label>
-        <input type="text" id="shopee-price-input" placeholder="Ex: 99.90" autocomplete="off" />
-      </div>
-      <div>
-        <label for="shopee-original-price-input">Preço original <span style="color:#444;font-weight:400">(opcional)</span></label>
-        <input type="text" id="shopee-original-price-input" placeholder="Ex: 149.90" autocomplete="off" />
-      </div>
-    </div>
-
-    <label for="shopee-image-input" style="margin-top:14px">URL da imagem <span style="color:#444;font-weight:400">(opcional)</span></label>
-    <input type="text" id="shopee-image-input" placeholder="https://..." autocomplete="off" />
-    <img id="shopee-img-preview" alt="Pré-visualização" />
-
-    <label for="shopee-coupon-input" style="margin-top:14px">Cupom <span style="color:#444;font-weight:400">(opcional)</span></label>
-    <input type="text" id="shopee-coupon-input" placeholder="Ex: SHOPEE10" autocomplete="off" style="text-transform:uppercase" />
-
-    <div class="input-row" style="margin-top:18px">
-      <button class="btn-primary" id="shopee-send-btn" style="flex:1">Enviar para o grupo</button>
-      <button class="btn-outline" id="shopee-cancel-btn">Cancelar</button>
-    </div>
-  </div>
-
-  <div class="loader" id="shopee-send-loader">
-    <div class="spinner"></div>
-    <span>Gerando descrição e enviando...</span>
   </div>
 
   <div id="shopee-result" style="display:none; margin-top:20px">
@@ -455,52 +423,15 @@
   <label for="amazon-url-input">Link de afiliado da Amazon</label>
   <div class="input-row">
     <input type="text" id="amazon-url-input" placeholder="https://www.amazon.com.br/dp/..." autocomplete="off" />
-    <button class="btn-primary" id="amazon-analyze-btn">Analisar</button>
+    <button class="btn-primary" id="amazon-send-btn">Enviar</button>
   </div>
+
+  <label for="amazon-coupon-input" style="margin-top:14px">Cupom <span style="color:#444;font-weight:400">(opcional)</span></label>
+  <input type="text" id="amazon-coupon-input" placeholder="Ex: AMAZON10" autocomplete="off" style="text-transform:uppercase" />
 
   <div class="loader" id="amazon-loader">
     <div class="spinner"></div>
     <span id="amazon-step-label">Analisando produto...</span>
-  </div>
-
-  <div class="scrape-warning" id="amazon-warning">
-    ⚠️ Não conseguimos identificar os dados automaticamente. Preencha os campos abaixo manualmente antes de enviar.
-  </div>
-
-  <div id="amazon-review">
-    <label for="amazon-title-input" style="margin-top:14px">Título do produto</label>
-    <input type="text" id="amazon-title-input" placeholder="Nome do produto" autocomplete="off" />
-
-    <div class="field-row" style="margin-top:14px">
-      <div>
-        <label for="amazon-price-input">Preço atual (R$)</label>
-        <input type="text" id="amazon-price-input" placeholder="Ex: 99.90" autocomplete="off" />
-      </div>
-      <div>
-        <label for="amazon-original-price-input">Preço original <span style="color:#444;font-weight:400">(opcional)</span></label>
-        <input type="text" id="amazon-original-price-input" placeholder="Ex: 149.90" autocomplete="off" />
-      </div>
-    </div>
-
-    <label for="amazon-discount-input" style="margin-top:14px">Desconto (%) <span style="color:#444;font-weight:400">(opcional)</span></label>
-    <input type="text" id="amazon-discount-input" placeholder="Ex: 61" autocomplete="off" />
-
-    <label for="amazon-image-input" style="margin-top:14px">URL da imagem <span style="color:#444;font-weight:400">(opcional)</span></label>
-    <input type="text" id="amazon-image-input" placeholder="https://..." autocomplete="off" />
-    <img id="amazon-img-preview" alt="Pré-visualização" />
-
-    <label for="amazon-coupon-input" style="margin-top:14px">Cupom <span style="color:#444;font-weight:400">(opcional)</span></label>
-    <input type="text" id="amazon-coupon-input" placeholder="Ex: AMAZON10" autocomplete="off" style="text-transform:uppercase" />
-
-    <div class="input-row" style="margin-top:18px">
-      <button class="btn-primary" id="amazon-send-btn" style="flex:1">Enviar para o grupo</button>
-      <button class="btn-outline" id="amazon-cancel-btn">Cancelar</button>
-    </div>
-  </div>
-
-  <div class="loader" id="amazon-send-loader">
-    <div class="spinner"></div>
-    <span>Gerando descrição e enviando...</span>
   </div>
 
   <div id="amazon-result" style="display:none; margin-top:20px">
@@ -524,6 +455,8 @@
   const groupInput  = document.getElementById('group-input');
   const saveBtn     = document.getElementById('save-btn');
   const saveFb      = document.getElementById('save-feedback');
+  const groupList   = document.getElementById('group-list');
+  const groupCount  = document.getElementById('group-count');
   const urlInput    = document.getElementById('url-input');
   const couponInput = document.getElementById('coupon-input');
   const sendBtn     = document.getElementById('send-btn');
@@ -538,6 +471,8 @@
 
   let connected = false;
   let subscriptionActive = true;
+  let maxGroups = 20;
+  let groups = [];
 
   // ── Subscription banner ───────────────────────────────────────────────────
   function showSubBanner(expiresAt) {
@@ -558,19 +493,67 @@
     }
   }
 
+  function sentBadgeText(sent, failed) {
+    const sentCount = sent?.length || 0;
+    const failedCount = failed?.length || 0;
+    if (!failedCount) return `✓ Enviado para ${sentCount} grupo${sentCount !== 1 ? 's' : ''}`;
+    return `⚠ Enviado para ${sentCount}/${sentCount + failedCount} grupos (${failedCount} falharam: ${failed.map((f) => f.name).join(', ')})`;
+  }
+
+  // ── Groups ────────────────────────────────────────────────────────────────
+  function renderGroups() {
+    groupCount.textContent = `(${groups.length}/${maxGroups})`;
+    groupList.innerHTML = '';
+    groups.forEach((name) => {
+      const chip = document.createElement('div');
+      chip.className = 'group-chip';
+      const label = document.createElement('span');
+      label.textContent = name;
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Remover grupo';
+      removeBtn.addEventListener('click', () => removeGroup(name));
+      chip.appendChild(label);
+      chip.appendChild(removeBtn);
+      groupList.appendChild(chip);
+    });
+    saveBtn.disabled = groups.length >= maxGroups;
+  }
+
+  function showSaveFeedback(text, isError) {
+    saveFb.className = isError ? 'save-feedback error' : 'save-feedback';
+    saveFb.textContent = text;
+    saveFb.style.display = 'block';
+    setTimeout(() => { saveFb.style.display = 'none'; }, 3000);
+  }
+
+  async function removeGroup(name) {
+    try {
+      const res = await fetch('/api/settings/groups', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupName: name }),
+      });
+      const data = await res.json();
+      if (data.success) { groups = data.groups; renderGroups(); }
+    } catch {}
+  }
+
   // ── Status polling ────────────────────────────────────────────────────────
   async function checkStatus() {
     try {
       const res = await fetch('/api/status');
       if (res.status === 401) { window.location.href = '/login'; return; }
-      const { ready, hasQR, groupName, subscriptionActive: subActive, subscriptionExpiresAt, username } = await res.json();
+      const { ready, hasQR, groups: serverGroups, maxGroups: serverMax, subscriptionActive: subActive, subscriptionExpiresAt, username } = await res.json();
 
       if (username) userBadge.textContent = username;
 
       subscriptionActive = subActive;
       if (subscriptionExpiresAt) showSubBanner(subscriptionExpiresAt);
 
-      if (groupName && !groupInput.value) groupInput.value = groupName;
+      if (serverMax) maxGroups = serverMax;
+      groups = serverGroups || [];
+      renderGroups();
 
       if (ready) {
         setConnected();
@@ -630,28 +613,38 @@
 
   checkStatus();
 
-  // ── Save group name ───────────────────────────────────────────────────────
+  // ── Add group ─────────────────────────────────────────────────────────────
   saveBtn.addEventListener('click', async () => {
     const groupName = groupInput.value.trim();
     if (!groupName) return;
 
+    if (groups.length >= maxGroups) {
+      showSaveFeedback(`Limite de ${maxGroups} grupos atingido`, true);
+      return;
+    }
+
     saveBtn.disabled = true;
-    saveFb.style.display = 'none';
 
     try {
-      const res = await fetch('/api/settings', {
+      const res = await fetch('/api/settings/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupName }),
       });
       const data = await res.json();
       if (data.success) {
-        saveFb.style.display = 'block';
-        setTimeout(() => { saveFb.style.display = 'none'; }, 3000);
+        groups = data.groups;
+        renderGroups();
+        groupInput.value = '';
+        showSaveFeedback('✓ Grupo adicionado', false);
+      } else {
+        showSaveFeedback(data.error || 'Erro ao adicionar grupo', true);
       }
-    } catch {}
+    } catch {
+      showSaveFeedback('Erro de conexão com o servidor', true);
+    }
 
-    saveBtn.disabled = false;
+    saveBtn.disabled = groups.length >= maxGroups;
   });
 
   groupInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveBtn.click(); });
@@ -686,6 +679,7 @@
       if (data.success) {
         resultBox.className = 'result-box success';
         resultBox.textContent = data.message;
+        sentBadge.textContent = sentBadgeText(data.sent, data.failed);
         sentBadge.style.display = 'flex';
         urlInput.value = '';
         couponInput.value = '';
@@ -711,130 +705,48 @@
   urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendBtn.click(); });
 
   // ── Shopee ────────────────────────────────────────────────────────────────
-  const shopeeUrlInput      = document.getElementById('shopee-url-input');
-  const shopeeAnalyzeBtn    = document.getElementById('shopee-analyze-btn');
-  const shopeeLoader        = document.getElementById('shopee-loader');
-  const shopeeWarning       = document.getElementById('shopee-warning');
-  const shopeeReview        = document.getElementById('shopee-review');
-  const shopeeTitleInput    = document.getElementById('shopee-title-input');
-  const shopeePriceInput    = document.getElementById('shopee-price-input');
-  const shopeeOrigPriceInput= document.getElementById('shopee-original-price-input');
-  const shopeeImageInput    = document.getElementById('shopee-image-input');
-  const shopeeImgPreview    = document.getElementById('shopee-img-preview');
-  const shopeeCouponInput   = document.getElementById('shopee-coupon-input');
-  const shopeeSendBtn       = document.getElementById('shopee-send-btn');
-  const shopeeCancelBtn     = document.getElementById('shopee-cancel-btn');
-  const shopeeSendLoader    = document.getElementById('shopee-send-loader');
-  const shopeeResultDiv     = document.getElementById('shopee-result');
-  const shopeeResultBox     = document.getElementById('shopee-result-box');
-  const shopeeSentBadge     = document.getElementById('shopee-sent-badge');
+  const shopeeUrlInput    = document.getElementById('shopee-url-input');
+  const shopeeCouponInput = document.getElementById('shopee-coupon-input');
+  const shopeeSendBtn     = document.getElementById('shopee-send-btn');
+  const shopeeLoader      = document.getElementById('shopee-loader');
+  const shopeeStepLabel   = document.getElementById('shopee-step-label');
+  const shopeeResultDiv   = document.getElementById('shopee-result');
+  const shopeeResultBox   = document.getElementById('shopee-result-box');
+  const shopeeSentBadge   = document.getElementById('shopee-sent-badge');
 
-  let shopeeAffiliateUrl = '';
-  let shopeeDiscountPercent = null;
-
-  function updateShopeeImgPreview() {
-    const src = shopeeImageInput.value.trim();
-    if (src) { shopeeImgPreview.src = src; shopeeImgPreview.style.display = 'block'; }
-    else { shopeeImgPreview.style.display = 'none'; }
-  }
-  shopeeImageInput.addEventListener('input', updateShopeeImgPreview);
-
-  function resetShopeeForm() {
-    shopeeReview.style.display = 'none';
-    shopeeWarning.style.display = 'none';
-    shopeeResultDiv.style.display = 'none';
-    shopeeTitleInput.value = '';
-    shopeePriceInput.value = '';
-    shopeeOrigPriceInput.value = '';
-    shopeeImageInput.value = '';
-    shopeeCouponInput.value = '';
-    shopeeImgPreview.style.display = 'none';
-    shopeeAffiliateUrl = '';
-    shopeeDiscountPercent = null;
-  }
-
-  shopeeAnalyzeBtn.addEventListener('click', async () => {
+  shopeeSendBtn.addEventListener('click', async () => {
     const url = shopeeUrlInput.value.trim();
     if (!url) return;
 
-    shopeeAnalyzeBtn.disabled = true;
-    shopeeLoader.style.display = 'flex';
-    shopeeReview.style.display = 'none';
-    shopeeWarning.style.display = 'none';
-    shopeeResultDiv.style.display = 'none';
-
-    try {
-      const res = await fetch('/api/shopee/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        const p = data.product;
-        shopeeAffiliateUrl = p.url || url;
-        shopeeTitleInput.value = p.title || '';
-        shopeePriceInput.value = p.currentPrice != null ? p.currentPrice : '';
-        shopeeOrigPriceInput.value = p.originalPrice != null ? p.originalPrice : '';
-        shopeeImageInput.value = p.imageUrl || '';
-        shopeeDiscountPercent = p.discountPercent != null ? p.discountPercent : null;
-        updateShopeeImgPreview();
-        if (!p.scraped) shopeeWarning.style.display = 'block';
-        shopeeReview.style.display = 'block';
-      } else {
-        shopeeAffiliateUrl = url;
-        shopeeWarning.style.display = 'block';
-        shopeeReview.style.display = 'block';
-      }
-    } catch {
-      shopeeAffiliateUrl = url;
-      shopeeWarning.style.display = 'block';
-      shopeeReview.style.display = 'block';
-    } finally {
-      shopeeLoader.style.display = 'none';
-      shopeeAnalyzeBtn.disabled = false;
-    }
-  });
-
-  shopeeCancelBtn.addEventListener('click', () => {
-    resetShopeeForm();
-    shopeeUrlInput.value = '';
-  });
-
-  shopeeSendBtn.addEventListener('click', async () => {
-    if (!shopeeAffiliateUrl) return;
-
     shopeeSendBtn.disabled = true;
-    shopeeSendLoader.style.display = 'flex';
+    shopeeLoader.style.display = 'flex';
     shopeeResultDiv.style.display = 'none';
     shopeeSentBadge.style.display = 'none';
+
+    const steps = ['Analisando produto na Shopee...', 'Isso pode levar até 30s...', 'Gerando descrição com IA e enviando...'];
+    let stepIdx = 0;
+    shopeeStepLabel.textContent = steps[0];
+    const stepInterval = setInterval(() => { shopeeStepLabel.textContent = steps[Math.min(++stepIdx, steps.length - 1)]; }, 8000);
 
     try {
       const res = await fetch('/api/shopee/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: shopeeAffiliateUrl,
-          title: shopeeTitleInput.value.trim(),
-          currentPrice: shopeePriceInput.value.trim(),
-          originalPrice: shopeeOrigPriceInput.value.trim(),
-          discountPercent: shopeeDiscountPercent != null ? shopeeDiscountPercent : '',
-          imageUrl: shopeeImageInput.value.trim(),
-          coupon: shopeeCouponInput.value.trim().toUpperCase() || null,
-        }),
+        body: JSON.stringify({ url, coupon: shopeeCouponInput.value.trim().toUpperCase() || null }),
       });
       const data = await res.json();
 
+      clearInterval(stepInterval);
+      shopeeLoader.style.display = 'none';
       shopeeResultDiv.style.display = 'block';
 
       if (data.success) {
-        shopeeUrlInput.value = '';
-        resetShopeeForm();
         shopeeResultBox.className = 'result-box success';
         shopeeResultBox.textContent = data.message;
+        shopeeSentBadge.textContent = sentBadgeText(data.sent, data.failed);
         shopeeSentBadge.style.display = 'flex';
-        shopeeResultDiv.style.display = 'block';
+        shopeeUrlInput.value = '';
+        shopeeCouponInput.value = '';
       } else if (res.status === 402) {
         shopeeResultBox.className = 'result-box error';
         shopeeResultBox.textContent = data.message || 'Assinatura expirada. Entre em contato para renovar.';
@@ -844,142 +756,62 @@
         shopeeResultBox.textContent = data.error || 'Erro desconhecido';
       }
     } catch {
+      clearInterval(stepInterval);
+      shopeeLoader.style.display = 'none';
       shopeeResultDiv.style.display = 'block';
       shopeeResultBox.className = 'result-box error';
       shopeeResultBox.textContent = 'Erro de conexão com o servidor.';
     } finally {
-      shopeeSendLoader.style.display = 'none';
+      shopeeStepLabel.textContent = 'Analisando produto...';
       if (subscriptionActive) shopeeSendBtn.disabled = false;
     }
   });
 
-  shopeeUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') shopeeAnalyzeBtn.click(); });
+  shopeeUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') shopeeSendBtn.click(); });
 
   // ── Amazon ────────────────────────────────────────────────────────────────
-  const amazonUrlInput      = document.getElementById('amazon-url-input');
-  const amazonAnalyzeBtn    = document.getElementById('amazon-analyze-btn');
-  const amazonLoader        = document.getElementById('amazon-loader');
-  const amazonWarning       = document.getElementById('amazon-warning');
-  const amazonReview        = document.getElementById('amazon-review');
-  const amazonTitleInput    = document.getElementById('amazon-title-input');
-  const amazonPriceInput    = document.getElementById('amazon-price-input');
-  const amazonOrigPriceInput= document.getElementById('amazon-original-price-input');
-  const amazonDiscountInput = document.getElementById('amazon-discount-input');
-  const amazonImageInput    = document.getElementById('amazon-image-input');
-  const amazonImgPreview    = document.getElementById('amazon-img-preview');
-  const amazonCouponInput   = document.getElementById('amazon-coupon-input');
-  const amazonSendBtn       = document.getElementById('amazon-send-btn');
-  const amazonCancelBtn     = document.getElementById('amazon-cancel-btn');
-  const amazonSendLoader    = document.getElementById('amazon-send-loader');
-  const amazonResultDiv     = document.getElementById('amazon-result');
-  const amazonResultBox     = document.getElementById('amazon-result-box');
-  const amazonSentBadge     = document.getElementById('amazon-sent-badge');
+  const amazonUrlInput    = document.getElementById('amazon-url-input');
+  const amazonCouponInput = document.getElementById('amazon-coupon-input');
+  const amazonSendBtn     = document.getElementById('amazon-send-btn');
+  const amazonLoader      = document.getElementById('amazon-loader');
+  const amazonStepLabel   = document.getElementById('amazon-step-label');
+  const amazonResultDiv   = document.getElementById('amazon-result');
+  const amazonResultBox   = document.getElementById('amazon-result-box');
+  const amazonSentBadge   = document.getElementById('amazon-sent-badge');
 
-  let amazonAffiliateUrl = '';
-
-  function updateAmazonImgPreview() {
-    const src = amazonImageInput.value.trim();
-    if (src) { amazonImgPreview.src = src; amazonImgPreview.style.display = 'block'; }
-    else { amazonImgPreview.style.display = 'none'; }
-  }
-  amazonImageInput.addEventListener('input', updateAmazonImgPreview);
-
-  function resetAmazonForm() {
-    amazonReview.style.display = 'none';
-    amazonWarning.style.display = 'none';
-    amazonResultDiv.style.display = 'none';
-    amazonTitleInput.value = '';
-    amazonPriceInput.value = '';
-    amazonOrigPriceInput.value = '';
-    amazonDiscountInput.value = '';
-    amazonImageInput.value = '';
-    amazonCouponInput.value = '';
-    amazonImgPreview.style.display = 'none';
-    amazonAffiliateUrl = '';
-  }
-
-  amazonAnalyzeBtn.addEventListener('click', async () => {
+  amazonSendBtn.addEventListener('click', async () => {
     const url = amazonUrlInput.value.trim();
     if (!url) return;
 
-    amazonAnalyzeBtn.disabled = true;
-    amazonLoader.style.display = 'flex';
-    amazonReview.style.display = 'none';
-    amazonWarning.style.display = 'none';
-    amazonResultDiv.style.display = 'none';
-
-    try {
-      const res = await fetch('/api/amazon/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        const p = data.product;
-        amazonAffiliateUrl = p.url || url;
-        amazonTitleInput.value = p.title || '';
-        amazonPriceInput.value = p.currentPrice != null ? p.currentPrice : '';
-        amazonOrigPriceInput.value = p.originalPrice != null ? p.originalPrice : '';
-        amazonDiscountInput.value = p.discountPercent != null ? p.discountPercent : '';
-        amazonImageInput.value = p.imageUrl || '';
-        updateAmazonImgPreview();
-        if (!p.scraped) amazonWarning.style.display = 'block';
-        amazonReview.style.display = 'block';
-      } else {
-        amazonAffiliateUrl = url;
-        amazonWarning.style.display = 'block';
-        amazonReview.style.display = 'block';
-      }
-    } catch {
-      amazonAffiliateUrl = url;
-      amazonWarning.style.display = 'block';
-      amazonReview.style.display = 'block';
-    } finally {
-      amazonLoader.style.display = 'none';
-      amazonAnalyzeBtn.disabled = false;
-    }
-  });
-
-  amazonCancelBtn.addEventListener('click', () => {
-    resetAmazonForm();
-    amazonUrlInput.value = '';
-  });
-
-  amazonSendBtn.addEventListener('click', async () => {
-    if (!amazonAffiliateUrl) return;
-
     amazonSendBtn.disabled = true;
-    amazonSendLoader.style.display = 'flex';
+    amazonLoader.style.display = 'flex';
     amazonResultDiv.style.display = 'none';
     amazonSentBadge.style.display = 'none';
+
+    const steps = ['Analisando produto na Amazon...', 'Isso pode levar alguns segundos...', 'Gerando descrição com IA e enviando...'];
+    let stepIdx = 0;
+    amazonStepLabel.textContent = steps[0];
+    const stepInterval = setInterval(() => { amazonStepLabel.textContent = steps[Math.min(++stepIdx, steps.length - 1)]; }, 8000);
 
     try {
       const res = await fetch('/api/amazon/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: amazonAffiliateUrl,
-          title: amazonTitleInput.value.trim(),
-          currentPrice: amazonPriceInput.value.trim(),
-          originalPrice: amazonOrigPriceInput.value.trim(),
-          discountPercent: amazonDiscountInput.value.trim(),
-          imageUrl: amazonImageInput.value.trim(),
-          coupon: amazonCouponInput.value.trim().toUpperCase() || null,
-        }),
+        body: JSON.stringify({ url, coupon: amazonCouponInput.value.trim().toUpperCase() || null }),
       });
       const data = await res.json();
 
+      clearInterval(stepInterval);
+      amazonLoader.style.display = 'none';
       amazonResultDiv.style.display = 'block';
 
       if (data.success) {
-        amazonUrlInput.value = '';
-        resetAmazonForm();
         amazonResultBox.className = 'result-box success';
         amazonResultBox.textContent = data.message;
+        amazonSentBadge.textContent = sentBadgeText(data.sent, data.failed);
         amazonSentBadge.style.display = 'flex';
-        amazonResultDiv.style.display = 'block';
+        amazonUrlInput.value = '';
+        amazonCouponInput.value = '';
       } else if (res.status === 402) {
         amazonResultBox.className = 'result-box error';
         amazonResultBox.textContent = data.message || 'Assinatura expirada. Entre em contato para renovar.';
@@ -989,16 +821,18 @@
         amazonResultBox.textContent = data.error || 'Erro desconhecido';
       }
     } catch {
+      clearInterval(stepInterval);
+      amazonLoader.style.display = 'none';
       amazonResultDiv.style.display = 'block';
       amazonResultBox.className = 'result-box error';
       amazonResultBox.textContent = 'Erro de conexão com o servidor.';
     } finally {
-      amazonSendLoader.style.display = 'none';
+      amazonStepLabel.textContent = 'Analisando produto...';
       if (subscriptionActive) amazonSendBtn.disabled = false;
     }
   });
 
-  amazonUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') amazonAnalyzeBtn.click(); });
+  amazonUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') amazonSendBtn.click(); });
 
   // ── Logout ────────────────────────────────────────────────────────────────
   logoutBtn.addEventListener('click', async () => {

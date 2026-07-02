@@ -2,12 +2,22 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
 
-// Map<userId, { client, ready, qr, destChatId, groupName, initializing }>
+const MAX_GROUPS = 20;
+// Intervalo entre envios para grupos diferentes, para reduzir o risco de
+// bloqueio por comportamento automatizado no WhatsApp. Não é garantia contra
+// banimento — apenas uma mitigação razoável para um pequeno número de grupos.
+const MIN_SEND_DELAY_MS = 8000;
+const MAX_SEND_DELAY_MS = 15000;
+
+// Map<userId, { client, ready, qr, destChatIds: Map<name, chatId>, groupNames: string[], initializing }>
 const clients = new Map();
 
 function getState(userId) {
   if (!clients.has(userId)) {
-    clients.set(userId, { client: null, ready: false, qr: null, destChatId: null, groupName: null, initializing: false });
+    clients.set(userId, {
+      client: null, ready: false, qr: null,
+      destChatIds: new Map(), groupNames: [], initializing: false,
+    });
   }
   return clients.get(userId);
 }
@@ -16,25 +26,23 @@ function isReady(userId) { return getState(userId).ready; }
 function getQR(userId) { return getState(userId).qr; }
 function isInitializing(userId) { const s = getState(userId); return s.initializing || !!s.client; }
 
-function setGroupName(userId, name) {
+function setGroupNames(userId, names) {
   const state = getState(userId);
-  state.groupName = name;
-  state.destChatId = null;
+  state.groupNames = (names || []).slice(0, MAX_GROUPS);
+  state.destChatIds = new Map();
 }
 
-async function resolveDestChatId(userId) {
+async function resolveDestChatId(userId, groupName) {
   const state = getState(userId);
-  if (state.destChatId) return state.destChatId;
-  if (!state.groupName) return null;
+  if (state.destChatIds.has(groupName)) return state.destChatIds.get(groupName);
   const chats = await state.client.getChats();
-  const found = chats.find((c) => c.isGroup && c.name === state.groupName);
+  const found = chats.find((c) => c.isGroup && c.name === groupName);
   if (!found) {
-    console.warn(`[WA:${userId}] Grupo "${state.groupName}" não encontrado`);
+    console.warn(`[WA:${userId}] Grupo "${groupName}" não encontrado`);
     return null;
   }
-  state.destChatId = found.id._serialized;
-  console.log(`[WA:${userId}] Grupo destino: "${found.name}"`);
-  return state.destChatId;
+  state.destChatIds.set(groupName, found.id._serialized);
+  return found.id._serialized;
 }
 
 async function trySend(fn, retries = 3) {
@@ -49,31 +57,65 @@ async function trySend(fn, retries = 3) {
   }
 }
 
-async function sendToGroup(userId, message, imageBuffer, imageUrl) {
-  const state = getState(userId);
-  if (!state.groupName) throw new Error('Grupo de destino não configurado');
-  const chatId = await resolveDestChatId(userId);
-  if (!chatId) throw new Error(`Grupo "${state.groupName}" não encontrado`);
-
-  if (imageBuffer && imageUrl) {
-    const ext = (imageUrl.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
-    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-    const media = new MessageMedia(mime, imageBuffer.toString('base64'), `produto.${ext}`);
-    await trySend(() => state.client.sendMessage(chatId, media, { caption: message }));
-  } else {
-    await trySend(() => state.client.sendMessage(chatId, message));
-  }
+function randomDelay() {
+  return MIN_SEND_DELAY_MS + Math.floor(Math.random() * (MAX_SEND_DELAY_MS - MIN_SEND_DELAY_MS));
 }
 
-async function initWhatsApp(userId, groupName) {
+// Envia a mesma mensagem para todos os grupos configurados, com um intervalo
+// aleatório entre cada envio. Retorna { sent: string[], failed: {name, error}[] }.
+async function sendToGroups(userId, message, imageBuffer, imageUrl) {
+  const state = getState(userId);
+  if (!state.groupNames.length) throw new Error('Nenhum grupo de destino configurado');
+
+  const media = imageBuffer && imageUrl
+    ? new MessageMedia(
+        (() => {
+          const ext = (imageUrl.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
+          return ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        })(),
+        imageBuffer.toString('base64'),
+        'produto.jpg'
+      )
+    : null;
+
+  const sent = [];
+  const failed = [];
+
+  for (let i = 0; i < state.groupNames.length; i++) {
+    const groupName = state.groupNames[i];
+    try {
+      const chatId = await resolveDestChatId(userId, groupName);
+      if (!chatId) throw new Error(`Grupo "${groupName}" não encontrado`);
+
+      if (media) await trySend(() => state.client.sendMessage(chatId, media, { caption: message }));
+      else await trySend(() => state.client.sendMessage(chatId, message));
+
+      sent.push(groupName);
+      console.log(`[WA:${userId}] Enviado para "${groupName}" (${i + 1}/${state.groupNames.length})`);
+    } catch (err) {
+      failed.push({ name: groupName, error: err.message });
+      console.warn(`[WA:${userId}] Falha ao enviar para "${groupName}":`, err.message);
+    }
+
+    if (i < state.groupNames.length - 1) {
+      const delay = randomDelay();
+      console.log(`[WA:${userId}] Aguardando ${Math.round(delay / 1000)}s antes do próximo grupo...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  return { sent, failed };
+}
+
+async function initWhatsApp(userId, groupNames) {
   const state = getState(userId);
   if (state.client || state.initializing) {
-    if (groupName && !state.groupName) setGroupName(userId, groupName);
+    if (groupNames?.length && !state.groupNames.length) setGroupNames(userId, groupNames);
     return;
   }
 
   state.initializing = true;
-  if (groupName) state.groupName = groupName;
+  if (groupNames?.length) state.groupNames = groupNames.slice(0, MAX_GROUPS);
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -115,11 +157,10 @@ async function initWhatsApp(userId, groupName) {
     console.log(`[WA:${userId}] Autenticado — sessão salva.`);
   });
 
-  client.on('ready', async () => {
+  client.on('ready', () => {
     state.ready = true;
     state.initializing = false;
     console.log(`[WA:${userId}] Conectado e pronto!`);
-    if (state.groupName) await resolveDestChatId(userId).catch(() => {});
   });
 
   client.on('auth_failure', (msg) => {
@@ -129,7 +170,7 @@ async function initWhatsApp(userId, groupName) {
 
   client.on('disconnected', (reason) => {
     state.ready = false;
-    state.destChatId = null;
+    state.destChatIds = new Map();
     console.warn(`[WA:${userId}] Desconectado:`, reason);
   });
 
@@ -148,4 +189,4 @@ async function destroyClient(userId) {
   clients.delete(userId);
 }
 
-module.exports = { initWhatsApp, sendToGroup, isReady, getQR, isInitializing, setGroupName, destroyClient };
+module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, MAX_GROUPS };

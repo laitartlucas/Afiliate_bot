@@ -5,9 +5,39 @@ const path = require('path');
 const QRCode = require('qrcode');
 const db = require('./src/database');
 const { get: getSetting, set: setSetting } = require('./src/settings');
-const { initWhatsApp, sendToGroup, isReady, getQR, isInitializing, setGroupName, destroyClient } = require('./src/whatsapp');
+const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, MAX_GROUPS } = require('./src/whatsapp');
 const { scrapeProduct, scrapeShopeeProduct, scrapeAmazonProduct, downloadImage } = require('./src/scraper');
+const shopeeApi = require('./src/shopeeApi');
 const { generateSalesMessage } = require('./src/ai');
+
+// Lista de grupos de destino, com migração automática do formato antigo
+// (DEST_GROUP_NAME, um único grupo) para o novo (DEST_GROUPS, lista).
+function getGroups(userId) {
+  const list = getSetting('DEST_GROUPS', userId);
+  if (Array.isArray(list)) return list;
+  const legacy = getSetting('DEST_GROUP_NAME', userId);
+  return legacy ? [legacy] : [];
+}
+
+function saveGroups(userId, groups) {
+  setSetting('DEST_GROUPS', groups, userId);
+  setGroupNames(userId, groups);
+}
+
+// Usa a API oficial de afiliados da Shopee quando configurada (SHOPEE_APP_ID/
+// SHOPEE_APP_SECRET); caso contrário cai no scraping via navegador headless.
+async function getShopeeProduct(url) {
+  if (shopeeApi.isConfigured()) {
+    try {
+      const product = await shopeeApi.getShopeeProductViaApi(url);
+      if (product.scraped) return product;
+      console.warn('[SHOPEE] API oficial não retornou dados, tentando scraping como fallback.');
+    } catch (err) {
+      console.warn('[SHOPEE] Erro na API oficial, tentando scraping como fallback:', err.message);
+    }
+  }
+  return scrapeShopeeProduct(url);
+}
 
 const required = ['ANTHROPIC_API_KEY', 'ADMIN_PASSWORD', 'SESSION_SECRET'];
 const missing = required.filter((k) => !process.env[k]);
@@ -157,11 +187,11 @@ app.get('/api/status', requireAuth, (req, res) => {
   const userId = req.session.userId;
   const user = db.getUser(userId);
   const subscriptionActive = db.isSubscriptionActive(user);
-  const groupName = getSetting('DEST_GROUP_NAME', userId);
+  const groups = getGroups(userId);
 
   // Auto-init WhatsApp on first status check
   if (!isInitializing(userId)) {
-    initWhatsApp(userId, groupName).catch((err) =>
+    initWhatsApp(userId, groups).catch((err) =>
       console.error(`[WA:${userId}] Erro ao inicializar:`, err.message)
     );
   }
@@ -169,7 +199,8 @@ app.get('/api/status', requireAuth, (req, res) => {
   res.json({
     ready: isReady(userId),
     hasQR: !!getQR(userId),
-    groupName: groupName || '',
+    groups,
+    maxGroups: MAX_GROUPS,
     subscriptionActive,
     subscriptionExpiresAt: user?.subscription_expires_at || null,
     username: req.session.username,
@@ -186,15 +217,32 @@ app.get('/api/qr', requireAuth, async (req, res) => {
   res.json({ qr: dataUrl });
 });
 
-app.post('/api/settings', requireAuth, (req, res) => {
+app.post('/api/settings/groups', requireAuth, (req, res) => {
   if (req.session.isAdmin) return res.status(403).json({ error: 'Admin não usa o bot' });
   const userId = req.session.userId;
-  const { groupName } = req.body;
-  if (!groupName?.trim()) return res.status(400).json({ error: 'Nome do grupo é obrigatório' });
-  setSetting('DEST_GROUP_NAME', groupName.trim(), userId);
-  setGroupName(userId, groupName.trim());
-  console.log(`[SETTINGS:${userId}] Grupo destino: "${groupName.trim()}"`);
-  res.json({ success: true });
+  const name = req.body.groupName?.trim();
+  if (!name) return res.status(400).json({ error: 'Nome do grupo é obrigatório' });
+
+  const groups = getGroups(userId);
+  if (groups.includes(name)) return res.status(409).json({ error: 'Esse grupo já foi adicionado' });
+  if (groups.length >= MAX_GROUPS) return res.status(400).json({ error: `Limite de ${MAX_GROUPS} grupos atingido` });
+
+  groups.push(name);
+  saveGroups(userId, groups);
+  console.log(`[SETTINGS:${userId}] Grupo adicionado: "${name}" (${groups.length}/${MAX_GROUPS})`);
+  res.json({ success: true, groups });
+});
+
+app.delete('/api/settings/groups', requireAuth, (req, res) => {
+  if (req.session.isAdmin) return res.status(403).json({ error: 'Admin não usa o bot' });
+  const userId = req.session.userId;
+  const name = req.body.groupName?.trim();
+  if (!name) return res.status(400).json({ error: 'Nome do grupo é obrigatório' });
+
+  const groups = getGroups(userId).filter((g) => g !== name);
+  saveGroups(userId, groups);
+  console.log(`[SETTINGS:${userId}] Grupo removido: "${name}" (${groups.length}/${MAX_GROUPS})`);
+  res.json({ success: true, groups });
 });
 
 app.post('/api/process', requireAuth, requireActiveSubscription, async (req, res) => {
@@ -202,7 +250,7 @@ app.post('/api/process', requireAuth, requireActiveSubscription, async (req, res
   const { url, coupon } = req.body;
   if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
   if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
-  if (!getSetting('DEST_GROUP_NAME', userId)) return res.status(400).json({ error: 'Configure o nome do grupo antes de enviar.' });
+  if (!getGroups(userId).length) return res.status(400).json({ error: 'Adicione ao menos um grupo antes de enviar.' });
 
   try {
     console.log(`[PIPELINE:${userId}] Processando: ${url.trim()}`);
@@ -218,27 +266,12 @@ app.post('/api/process', requireAuth, requireActiveSubscription, async (req, res
       catch (err) { console.warn(`[PIPELINE:${userId}] Imagem não baixada:`, err.message); }
     }
 
-    await sendToGroup(userId, message, imageBuffer, product.imageUrl);
-    console.log(`[PIPELINE:${userId}] Enviado!`);
+    const { sent, failed } = await sendToGroups(userId, message, imageBuffer, product.imageUrl);
+    console.log(`[PIPELINE:${userId}] Enviado para ${sent.length}/${sent.length + failed.length} grupos`);
 
-    res.json({ success: true, message, product });
+    res.json({ success: true, message, product, sent, failed });
   } catch (err) {
     console.error(`[PIPELINE:${userId}] Erro:`, err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/shopee/analyze', requireAuth, requireActiveSubscription, async (req, res) => {
-  const userId = req.session.userId;
-  const { url } = req.body;
-  if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
-
-  try {
-    console.log(`[SHOPEE:${userId}] Analisando: ${url.trim()}`);
-    const product = await scrapeShopeeProduct(url.trim());
-    res.json({ success: true, product });
-  } catch (err) {
-    console.error(`[SHOPEE:${userId}] Erro ao analisar:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -249,17 +282,30 @@ app.post('/api/shopee/process', requireAuth, requireActiveSubscription, async (r
 
   if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
   if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
-  if (!getSetting('DEST_GROUP_NAME', userId)) return res.status(400).json({ error: 'Configure o nome do grupo antes de enviar.' });
+  if (!getGroups(userId).length) return res.status(400).json({ error: 'Adicione ao menos um grupo antes de enviar.' });
 
-  const product = {
-    title: title?.trim() || null,
-    currentPrice: currentPrice !== undefined && currentPrice !== '' ? parseFloat(currentPrice) : null,
-    originalPrice: originalPrice !== undefined && originalPrice !== '' ? parseFloat(originalPrice) : null,
-    discountPercent: discountPercent !== undefined && discountPercent !== '' ? parseInt(discountPercent, 10) : null,
-    imageUrl: imageUrl?.trim() || null,
-    features: [],
-    url: url.trim(),
-  };
+  let product;
+  if (title?.trim()) {
+    // Dados já revisados/informados manualmente pelo cliente
+    product = {
+      title: title.trim(),
+      currentPrice: currentPrice !== undefined && currentPrice !== '' ? parseFloat(currentPrice) : null,
+      originalPrice: originalPrice !== undefined && originalPrice !== '' ? parseFloat(originalPrice) : null,
+      discountPercent: discountPercent !== undefined && discountPercent !== '' ? parseInt(discountPercent, 10) : null,
+      imageUrl: imageUrl?.trim() || null,
+      features: [],
+      url: url.trim(),
+    };
+  } else {
+    // Fluxo automático: raspa os dados agora, sem etapa de revisão manual
+    console.log(`[SHOPEE:${userId}] Analisando automaticamente: ${url.trim()}`);
+    product = await getShopeeProduct(url.trim());
+    if (!product.scraped) {
+      return res.status(422).json({
+        error: 'Não conseguimos identificar os dados desse produto automaticamente (a Shopee bloqueou a análise). Tente novamente em alguns instantes ou use outro link.',
+      });
+    }
+  }
 
   try {
     console.log(`[SHOPEE:${userId}] Processando: "${product.title}"`);
@@ -272,27 +318,12 @@ app.post('/api/shopee/process', requireAuth, requireActiveSubscription, async (r
       catch (err) { console.warn(`[SHOPEE:${userId}] Imagem não baixada:`, err.message); }
     }
 
-    await sendToGroup(userId, message, imageBuffer, product.imageUrl);
-    console.log(`[SHOPEE:${userId}] Enviado!`);
+    const { sent, failed } = await sendToGroups(userId, message, imageBuffer, product.imageUrl);
+    console.log(`[SHOPEE:${userId}] Enviado para ${sent.length}/${sent.length + failed.length} grupos`);
 
-    res.json({ success: true, message, product });
+    res.json({ success: true, message, product, sent, failed });
   } catch (err) {
     console.error(`[SHOPEE:${userId}] Erro:`, err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/amazon/analyze', requireAuth, requireActiveSubscription, async (req, res) => {
-  const userId = req.session.userId;
-  const { url } = req.body;
-  if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
-
-  try {
-    console.log(`[AMAZON:${userId}] Analisando: ${url.trim()}`);
-    const product = await scrapeAmazonProduct(url.trim());
-    res.json({ success: true, product });
-  } catch (err) {
-    console.error(`[AMAZON:${userId}] Erro ao analisar:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -303,17 +334,30 @@ app.post('/api/amazon/process', requireAuth, requireActiveSubscription, async (r
 
   if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
   if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
-  if (!getSetting('DEST_GROUP_NAME', userId)) return res.status(400).json({ error: 'Configure o nome do grupo antes de enviar.' });
+  if (!getGroups(userId).length) return res.status(400).json({ error: 'Adicione ao menos um grupo antes de enviar.' });
 
-  const product = {
-    title: title?.trim() || null,
-    currentPrice: currentPrice !== undefined && currentPrice !== '' ? parseFloat(currentPrice) : null,
-    originalPrice: originalPrice !== undefined && originalPrice !== '' ? parseFloat(originalPrice) : null,
-    discountPercent: discountPercent !== undefined && discountPercent !== '' ? parseInt(discountPercent, 10) : null,
-    imageUrl: imageUrl?.trim() || null,
-    features: [],
-    url: url.trim(),
-  };
+  let product;
+  if (title?.trim()) {
+    // Dados já revisados/informados manualmente pelo cliente
+    product = {
+      title: title.trim(),
+      currentPrice: currentPrice !== undefined && currentPrice !== '' ? parseFloat(currentPrice) : null,
+      originalPrice: originalPrice !== undefined && originalPrice !== '' ? parseFloat(originalPrice) : null,
+      discountPercent: discountPercent !== undefined && discountPercent !== '' ? parseInt(discountPercent, 10) : null,
+      imageUrl: imageUrl?.trim() || null,
+      features: [],
+      url: url.trim(),
+    };
+  } else {
+    // Fluxo automático: raspa os dados agora, sem etapa de revisão manual
+    console.log(`[AMAZON:${userId}] Analisando automaticamente: ${url.trim()}`);
+    product = await scrapeAmazonProduct(url.trim());
+    if (!product.scraped) {
+      return res.status(422).json({
+        error: 'Não conseguimos identificar os dados desse produto automaticamente (a Amazon bloqueou a análise). Tente novamente em alguns instantes ou use outro link.',
+      });
+    }
+  }
 
   try {
     console.log(`[AMAZON:${userId}] Processando: "${product.title}"`);
@@ -326,10 +370,10 @@ app.post('/api/amazon/process', requireAuth, requireActiveSubscription, async (r
       catch (err) { console.warn(`[AMAZON:${userId}] Imagem não baixada:`, err.message); }
     }
 
-    await sendToGroup(userId, message, imageBuffer, product.imageUrl);
-    console.log(`[AMAZON:${userId}] Enviado!`);
+    const { sent, failed } = await sendToGroups(userId, message, imageBuffer, product.imageUrl);
+    console.log(`[AMAZON:${userId}] Enviado para ${sent.length}/${sent.length + failed.length} grupos`);
 
-    res.json({ success: true, message, product });
+    res.json({ success: true, message, product, sent, failed });
   } catch (err) {
     console.error(`[AMAZON:${userId}] Erro:`, err.message);
     res.status(500).json({ error: err.message });

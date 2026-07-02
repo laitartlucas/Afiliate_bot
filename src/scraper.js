@@ -1,6 +1,9 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+puppeteer.use(StealthPlugin());
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -166,10 +169,7 @@ function parseShopeePriceText(text) {
   return parsePrice(match[1]);
 }
 
-async function scrapeShopeeProduct(originalUrl) {
-  const url = await resolveUrl(originalUrl);
-  console.log(`[SCRAPER:Shopee] URL final: ${url}`);
-
+async function scrapeShopeeProductOnce(originalUrl) {
   const result = {
     title: null, currentPrice: null, originalPrice: null,
     discountPercent: null, imageUrl: null, features: [],
@@ -184,8 +184,13 @@ async function scrapeShopeeProduct(originalUrl) {
     await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
     await page.setViewport({ width: 1280, height: 900 });
 
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    // Navega direto no link curto original — deixa o próprio Chrome seguir toda
+    // a cadeia de redirecionamento (HTTP + JS), igual um navegador de verdade.
+    // Resolver via axios antes quebra o fingerprint que o redirecionador da
+    // Shopee (AppsFlyer/OneLink) espera e derruba a página em /verify/traffic/error.
+    await page.goto(originalUrl, { waitUntil: 'networkidle2', timeout: 45000 });
     await page.waitForSelector('h1, [class*="price"]', { timeout: 8000 }).catch(() => {});
+    console.log(`[SCRAPER:Shopee] URL final após redirecionamentos: ${page.url()}`);
 
     const data = await page.evaluate(() => {
       // Seletores específicos da página de produto da Shopee
@@ -248,6 +253,19 @@ async function scrapeShopeeProduct(originalUrl) {
   return result;
 }
 
+async function scrapeShopeeProduct(originalUrl, attempts = 3) {
+  console.log(`[SCRAPER:Shopee] URL original: ${originalUrl}`);
+
+  let last = null;
+  for (let i = 1; i <= attempts; i++) {
+    last = await scrapeShopeeProductOnce(originalUrl);
+    if (last.scraped) return last;
+    console.warn(`[SCRAPER:Shopee] Tentativa ${i}/${attempts} sem sucesso.`);
+    if (i < attempts) await new Promise((r) => setTimeout(r, 1500 * i));
+  }
+  return last;
+}
+
 // ── Amazon ───────────────────────────────────────────────────────────────────
 // Amazon bloqueia requisições HTTP simples com uma página de validação
 // (opfcaptcha), por isso também usamos o navegador headless compartilhado.
@@ -258,10 +276,7 @@ function parseAmazonPriceText(text) {
   return match ? parsePrice(match[1]) : null;
 }
 
-async function scrapeAmazonProduct(originalUrl) {
-  const url = await resolveUrl(originalUrl);
-  console.log(`[SCRAPER:Amazon] URL final: ${url}`);
-
+async function scrapeAmazonProductOnce(originalUrl) {
   const result = {
     title: null, currentPrice: null, originalPrice: null,
     discountPercent: null, imageUrl: null, features: [],
@@ -276,8 +291,11 @@ async function scrapeAmazonProduct(originalUrl) {
     await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
     await page.setViewport({ width: 1280, height: 900 });
 
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    // Navega direto no link original (funciona também para encurtadores como
+    // amzn.to) — deixa o Chrome seguir toda a cadeia de redirecionamento.
+    await page.goto(originalUrl, { waitUntil: 'networkidle2', timeout: 45000 });
     await page.waitForSelector('#productTitle, .apex-pricetopay-value', { timeout: 8000 }).catch(() => {});
+    console.log(`[SCRAPER:Amazon] URL final após redirecionamentos: ${page.url()}`);
 
     const data = await page.evaluate(() => {
       // Título
@@ -352,6 +370,19 @@ async function scrapeAmazonProduct(originalUrl) {
   }
 
   return result;
+}
+
+async function scrapeAmazonProduct(originalUrl, attempts = 3) {
+  console.log(`[SCRAPER:Amazon] URL original: ${originalUrl}`);
+
+  let last = null;
+  for (let i = 1; i <= attempts; i++) {
+    last = await scrapeAmazonProductOnce(originalUrl);
+    if (last.scraped) return last;
+    console.warn(`[SCRAPER:Amazon] Tentativa ${i}/${attempts} sem sucesso.`);
+    if (i < attempts) await new Promise((r) => setTimeout(r, 1500 * i));
+  }
+  return last;
 }
 
 async function downloadImage(url) {

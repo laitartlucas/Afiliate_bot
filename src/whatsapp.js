@@ -50,7 +50,7 @@ async function trySend(fn, retries = 3) {
     try {
       return await fn();
     } catch (err) {
-      console.warn(`[WA] Tentativa ${i}/${retries} falhou: ${err.message}`);
+      console.warn(`[WA] Tentativa ${i}/${retries} falhou:`, err.stack || err);
       if (i === retries) throw err;
       await new Promise((r) => setTimeout(r, i * 3000));
     }
@@ -94,7 +94,9 @@ async function sendToGroups(userId, message, imageBuffer, imageUrl) {
       console.log(`[WA:${userId}] Enviado para "${groupName}" (${i + 1}/${state.groupNames.length})`);
     } catch (err) {
       failed.push({ name: groupName, error: err.message });
-      console.warn(`[WA:${userId}] Falha ao enviar para "${groupName}":`, err.message);
+      // Log completo (stack) em vez de só err.message, para não mascarar
+      // erros minificados vindos de dentro do contexto do WhatsApp Web.
+      console.warn(`[WA:${userId}] Falha ao enviar para "${groupName}":`, err.stack || err);
     }
 
     if (i < state.groupNames.length - 1) {
@@ -122,7 +124,14 @@ async function initWhatsApp(userId, groupNames) {
       clientId: `user-${userId}`,
       dataPath: path.join(process.cwd(), '.wwebjs_auth'),
     }),
-    webVersionCache: { type: 'local', path: './.wwebjs_cache' },
+    // Cache da versão do WhatsApp Web isolado por usuário. Antes era um
+    // único path compartilhado entre todas as sessões — isso podia fazer
+    // uma sessão nova herdar/disputar uma versão de bundle incompatível
+    // com a conta dela, gerando erros minificados (ex: "r") só nela.
+    webVersionCache: {
+      type: 'local',
+      path: path.join(process.cwd(), '.wwebjs_cache', `user-${userId}`),
+    },
     puppeteer: {
       headless: true,
       protocolTimeout: 300000,
@@ -177,7 +186,7 @@ async function initWhatsApp(userId, groupNames) {
   client.initialize().catch((err) => {
     state.initializing = false;
     state.client = null;
-    console.error(`[WA:${userId}] Erro ao inicializar:`, err.message);
+    console.error(`[WA:${userId}] Erro ao inicializar:`, err.stack || err.message);
   });
 }
 

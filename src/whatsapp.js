@@ -35,14 +35,44 @@ function setGroupNames(userId, names) {
 async function resolveDestChatId(userId, groupName) {
   const state = getState(userId);
   if (state.destChatIds.has(groupName)) return state.destChatIds.get(groupName);
-  const chats = await state.client.getChats();
-  const found = chats.find((c) => c.isGroup && c.name === groupName);
+
+  // NÃO usamos client.getChats() aqui. Aquele método serializa TODOS os chats
+  // e, para cada grupo, chama groupMetadata.update()/LidMigration. Se um único
+  // chat da conta falhar ao serializar (metadata inválida, migração de LID,
+  // canal/newsletter, comunidade...), o Promise.all interno rejeita com um erro
+  // minificado ("r: r") e NENHUM grupo é retornado — mesmo os saudáveis.
+  //
+  // Em vez disso lemos apenas id + nome direto da collection do WhatsApp Web,
+  // tolerando falha por chat individual (um chat ruim é ignorado, não derruba
+  // a listagem inteira).
+  const groups = await state.client.pupPage.evaluate(() => {
+    const out = [];
+    const chats = window.require('WAWebCollections').Chat.getModelsArray();
+    for (const chat of chats) {
+      try {
+        const id = chat.id && chat.id._serialized;
+        if (!id || !id.endsWith('@g.us')) continue; // só grupos
+        const name =
+          chat.formattedTitle ||
+          chat.name ||
+          (chat.groupMetadata && chat.groupMetadata.subject) ||
+          '';
+        out.push({ id, name });
+      } catch (_) {
+        // chat problemático: ignora e segue
+      }
+    }
+    return out;
+  });
+
+  const found = groups.find((g) => g.name === groupName);
   if (!found) {
-    console.warn(`[WA:${userId}] Grupo "${groupName}" não encontrado`);
+    const visiveis = groups.map((g) => g.name).filter(Boolean).join(', ') || 'nenhum';
+    console.warn(`[WA:${userId}] Grupo "${groupName}" não encontrado (grupos visíveis: ${visiveis})`);
     return null;
   }
-  state.destChatIds.set(groupName, found.id._serialized);
-  return found.id._serialized;
+  state.destChatIds.set(groupName, found.id);
+  return found.id;
 }
 
 async function trySend(fn, retries = 3) {

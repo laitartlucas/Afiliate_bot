@@ -1,33 +1,33 @@
-# 🤖 ML Affiliate Bot — WhatsApp + Mercado Livre + Claude AI
+# 🤖 ML Affiliate Bot — WhatsApp + Mercado Livre + Shopee + Amazon + Claude AI
 
-Automação completa para grupos de ofertas no WhatsApp. Monitora um grupo, detecta links de afiliados do Mercado Livre, analisa o produto com IA e reposta uma descrição profissional com imagem em outro grupo.
+Painel web multi-usuário para grupos de ofertas no WhatsApp. Você cola o link de afiliado (Mercado Livre, Shopee ou Amazon) na interface, o bot analisa o produto com IA e envia a descrição pronta com imagem para os grupos de destino configurados.
 
 ---
 
 ## 🚀 Como Funciona
 
 ```
-[Grupo Origem]                [Bot Node.js]                  [Grupo Destino]
-Você cola o link  ──────►  Scraping do produto          ──────►  📸 Imagem
-de afiliado ML             Análise com Claude AI                 💬 Descrição top
-                           Download da imagem                    🔗 Link original
+[Interface Web]                [Bot Node.js]                  [Grupos WhatsApp]
+Você cola o link   ──────►  Scraping do produto         ──────►  📸 Imagem
+de afiliado                 Análise com Claude AI                💬 Descrição top
+                             Download da imagem                  🔗 Link original
 ```
 
-1. Você copia um link de afiliado do Mercado Livre
-2. Cola no grupo de origem do WhatsApp
-3. O bot detecta o link automaticamente
-4. Faz scraping do produto (título, preço, imagem, características)
-5. A Claude API cria uma descrição impactante com emojis e CTA
-6. O bot envia imagem + descrição + link para o grupo de destino
+1. Você faz login na interface web e cola um link de afiliado (Mercado Livre, Shopee ou Amazon)
+2. O bot faz scraping do produto (título, preço, imagem, características)
+3. A Claude API cria uma descrição impactante com emojis e CTA
+4. O bot envia imagem + descrição + link para os grupos de destino cadastrados na sua conta
+
+Cada usuário tem sua própria conexão de WhatsApp (via QR Code) e sua própria lista de grupos de destino, gerenciadas por um administrador em `/admin`.
 
 ---
 
 ## 📋 Pré-requisitos
 
 - Node.js 18+
-- Um número de WhatsApp dedicado (ou o seu, ciente de que ficará conectado)
+- Um número de WhatsApp por usuário (ou o seu, ciente de que ficará conectado)
 - Chave de API da Anthropic → [console.anthropic.com](https://console.anthropic.com)
-- Estar presente nos dois grupos do WhatsApp (origem e destino)
+- Estar presente nos grupos de destino do WhatsApp de cada usuário
 
 ---
 
@@ -49,11 +49,15 @@ Edite o arquivo `.env`:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
-SOURCE_GROUP_NAME=Nome Exato do Grupo Origem
-DEST_GROUP_NAME=Nome Exato do Grupo Destino
-```
+ADMIN_PASSWORD=senha-do-admin-aqui
+SESSION_SECRET=string-aleatoria-longa-aqui
+PORT=3000
 
-> ⚠️ Os nomes dos grupos precisam ser **exatamente iguais** aos nomes no WhatsApp, incluindo espaços e acentos.
+# Opcional — API oficial de afiliados da Shopee. Sem isso, o bot usa
+# scraping via navegador headless como alternativa.
+SHOPEE_APP_ID=
+SHOPEE_APP_SECRET=
+```
 
 ---
 
@@ -63,9 +67,11 @@ DEST_GROUP_NAME=Nome Exato do Grupo Destino
 npm start
 ```
 
-Na primeira execução, um **QR Code aparecerá no terminal**. Escaneie com o WhatsApp do celular que vai monitorar o grupo (Configurações → Aparelhos conectados → Conectar aparelho).
+1. Acesse `http://localhost:3000/admin` e entre com usuário `admin` e a senha definida em `ADMIN_PASSWORD`.
+2. Crie um usuário para cada conta de WhatsApp que vai enviar ofertas (usuário, senha e, opcionalmente, data de vencimento da assinatura).
+3. Cada usuário faz login na raiz (`/`), escaneia o **QR Code** exibido na tela com o WhatsApp que vai enviar as ofertas (Configurações → Aparelhos conectados → Conectar aparelho) e cadastra os grupos de destino pela própria interface.
 
-A sessão fica salva localmente — nas próximas execuções, não precisará escanear novamente.
+A sessão do WhatsApp fica salva localmente por usuário — nos próximos starts, não precisa escanear de novo. Depois de conectado, basta colar o link de afiliado (Mercado Livre, Shopee ou Amazon) na tela correspondente e enviar.
 
 ---
 
@@ -76,12 +82,18 @@ ml-affiliate-bot/
 ├── .env                  # Variáveis de ambiente (não commitar)
 ├── .env.example          # Exemplo de configuração
 ├── package.json
-├── index.js              # Ponto de entrada
+├── index.js              # Ponto de entrada — rotas Express e orquestração
+├── public/
+│   ├── login.html        # Tela de login
+│   ├── app.html           # Tela principal do usuário (WhatsApp, grupos, envio)
+│   └── admin.html         # Painel de administração de usuários
 └── src/
-    ├── whatsapp.js       # Cliente WhatsApp e lógica de grupos
-    ├── scraper.js        # Scraping do produto no Mercado Livre
-    ├── ai.js             # Integração com Claude API
-    └── utils.js          # Helpers (extração de URL, download de imagem, etc.)
+    ├── database.js       # Usuários e assinaturas (SQLite)
+    ├── settings.js       # Configurações por usuário (grupos de destino)
+    ├── whatsapp.js        # Cliente WhatsApp e lógica de grupos
+    ├── scraper.js         # Scraping do Mercado Livre, Shopee e Amazon
+    ├── shopeeApi.js        # API oficial de afiliados da Shopee (opcional)
+    └── ai.js              # Integração com Claude API
 ```
 
 ---
@@ -142,6 +154,7 @@ node_modules/
 .env
 .wwebjs_auth/
 .wwebjs_cache/
+data/
 ```
 
 ---

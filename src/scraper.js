@@ -149,15 +149,61 @@ async function scrapeProduct(originalUrl) {
 // para renderizar a página antes de extrair os dados.
 
 let sharedBrowser = null;
+let idleCloseTimer = null;
+// Sem isso o Chromium do scraper ficava ligado pra sempre depois do primeiro
+// uso, mesmo passando horas sem raspar nada — é a 3ª instância de navegador
+// rodando ao lado das sessões de WhatsApp, então fechamos por inatividade.
+const BROWSER_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function getBrowser() {
+  if (idleCloseTimer) {
+    clearTimeout(idleCloseTimer);
+    idleCloseTimer = null;
+  }
   if (sharedBrowser) return sharedBrowser;
   sharedBrowser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-extensions',
+      '--disable-sync',
+      '--no-first-run',
+      '--memory-pressure-off',
+      '--js-flags=--max-old-space-size=256',
+    ],
   });
   sharedBrowser.on('disconnected', () => { sharedBrowser = null; });
   return sharedBrowser;
+}
+
+function scheduleIdleClose() {
+  if (idleCloseTimer) clearTimeout(idleCloseTimer);
+  idleCloseTimer = setTimeout(async () => {
+    idleCloseTimer = null;
+    const browser = sharedBrowser;
+    sharedBrowser = null;
+    if (browser) {
+      await browser.close().catch(() => {});
+      console.log('[SCRAPER] Navegador headless fechado por inatividade.');
+    }
+  }, BROWSER_IDLE_TIMEOUT_MS);
+}
+
+async function setupLightweightPage(page) {
+  // Bloqueia imagens/mídia/fontes — não precisamos renderizar visualmente a
+  // página pra extrair texto/preço, e isso reduz bastante RAM e CPU do Chromium.
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const type = req.resourceType();
+    if (type === 'image' || type === 'media' || type === 'font') req.abort();
+    else req.continue();
+  });
 }
 
 // ── Shopee ───────────────────────────────────────────────────────────────────
@@ -180,6 +226,7 @@ async function scrapeShopeeProductOnce(originalUrl) {
   try {
     const browser = await getBrowser();
     page = await browser.newPage();
+    await setupLightweightPage(page);
     await page.setUserAgent(HEADERS['User-Agent']);
     await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
     await page.setViewport({ width: 1280, height: 900 });
@@ -248,6 +295,7 @@ async function scrapeShopeeProductOnce(originalUrl) {
     console.warn('[SCRAPER:Shopee] Falha ao extrair dados automaticamente:', err.message);
   } finally {
     if (page) await page.close().catch(() => {});
+    scheduleIdleClose();
   }
 
   return result;
@@ -287,6 +335,7 @@ async function scrapeAmazonProductOnce(originalUrl) {
   try {
     const browser = await getBrowser();
     page = await browser.newPage();
+    await setupLightweightPage(page);
     await page.setUserAgent(HEADERS['User-Agent']);
     await page.setExtraHTTPHeaders({ 'Accept-Language': HEADERS['Accept-Language'] });
     await page.setViewport({ width: 1280, height: 900 });
@@ -367,6 +416,7 @@ async function scrapeAmazonProductOnce(originalUrl) {
     console.warn('[SCRAPER:Amazon] Falha ao extrair dados automaticamente:', err.message);
   } finally {
     if (page) await page.close().catch(() => {});
+    scheduleIdleClose();
   }
 
   return result;

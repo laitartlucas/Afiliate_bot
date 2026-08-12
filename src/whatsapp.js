@@ -179,6 +179,7 @@ async function initWhatsApp(userId, groupNames) {
         '--disable-sync',
         '--no-first-run',
         '--memory-pressure-off',
+        '--js-flags=--max-old-space-size=256',
       ],
     },
   });
@@ -203,14 +204,25 @@ async function initWhatsApp(userId, groupNames) {
   });
 
   client.on('auth_failure', (msg) => {
-    state.initializing = false;
     console.error(`[WA:${userId}] Falha de autenticação: ${msg}`);
+    // Sem zerar state.client aqui, o Chromium ficava aberto e "zumbi" (nunca
+    // autenticado, mas consumindo RAM), e isInitializing() continuava
+    // retornando true pra sempre — bloqueando qualquer nova tentativa de
+    // conexão pelo /api/status.
+    state.initializing = false;
+    state.client = null;
+    client.destroy().catch(() => {});
   });
 
   client.on('disconnected', (reason) => {
+    console.warn(`[WA:${userId}] Desconectado:`, reason);
+    // Mesmo problema do auth_failure: sem derrubar o browser e liberar
+    // state.client, a sessão desconectada ficava presa em memória e nunca
+    // era reaberta automaticamente pelo auto-init do /api/status.
     state.ready = false;
     state.destChatIds = new Map();
-    console.warn(`[WA:${userId}] Desconectado:`, reason);
+    state.client = null;
+    client.destroy().catch(() => {});
   });
 
   client.initialize().catch((err) => {

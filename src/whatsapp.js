@@ -179,7 +179,6 @@ async function initWhatsApp(userId, groupNames) {
         '--disable-sync',
         '--no-first-run',
         '--memory-pressure-off',
-        '--js-flags=--max-old-space-size=256',
       ],
     },
   });

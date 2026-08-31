@@ -1,0 +1,8 @@
+{
+	email {$LETSENCRYPT_EMAIL}
+}
+
+{$DOMAIN} {
+	reverse_proxy bot:3000
+	encode gzip
+}

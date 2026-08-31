@@ -1,0 +1,51 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afiliate-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Não publica a porta no host — só fica acessível para o Caddy via rede
+    # interna do compose. O acesso externo passa sempre pelo proxy reverso.
+    expose:
+      - "3000"
+    # Chromium (Puppeteer) é o principal consumidor de memória do container.
+    # 1.5GB costuma ser suficiente para uma sessão do WhatsApp Web; ajuste
+    # conforme o VPS. Abaixo de ~1GB o Chromium tende a crashar sob carga.
+    mem_limit: 1536m
+    volumes:
+      - ./data:/app/data
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      - ./.wwebjs_cache:/app/.wwebjs_cache
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: afiliate-bot-caddy
+    restart: unless-stopped
+    depends_on:
+      - bot
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  # Guardam certificados TLS emitidos pelo Let's Encrypt para não reemitir
+  # (e não bater em rate limit) a cada `docker compose up`.
+  caddy_data:
+  caddy_config:

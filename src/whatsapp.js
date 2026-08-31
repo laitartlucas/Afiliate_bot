@@ -45,25 +45,40 @@ async function resolveDestChatId(userId, groupName) {
   // Em vez disso lemos apenas id + nome direto da collection do WhatsApp Web,
   // tolerando falha por chat individual (um chat ruim é ignorado, não derruba
   // a listagem inteira).
-  const groups = await state.client.pupPage.evaluate(() => {
-    const out = [];
-    const chats = window.require('WAWebCollections').Chat.getModelsArray();
-    for (const chat of chats) {
-      try {
-        const id = chat.id && chat.id._serialized;
-        if (!id || !id.endsWith('@g.us')) continue; // só grupos
-        const name =
-          chat.formattedTitle ||
-          chat.name ||
-          (chat.groupMetadata && chat.groupMetadata.subject) ||
-          '';
-        out.push({ id, name });
-      } catch (_) {
-        // chat problemático: ignora e segue
-      }
+  // state.client.pupPage.evaluate() pode falhar intermitentemente com
+  // "ProtocolError: Runtime.callFunctionOn timed out" — problema conhecido
+  // do whatsapp-web.js relacionado a atualizações do WhatsApp Web, não bug
+  // nosso. Tentamos novamente antes de desistir, como em trySend().
+  const EVALUATE_RETRIES = 3;
+  let groups;
+  for (let i = 1; i <= EVALUATE_RETRIES; i++) {
+    try {
+      groups = await state.client.pupPage.evaluate(() => {
+        const out = [];
+        const chats = window.require('WAWebCollections').Chat.getModelsArray();
+        for (const chat of chats) {
+          try {
+            const id = chat.id && chat.id._serialized;
+            if (!id || !id.endsWith('@g.us')) continue; // só grupos
+            const name =
+              chat.formattedTitle ||
+              chat.name ||
+              (chat.groupMetadata && chat.groupMetadata.subject) ||
+              '';
+            out.push({ id, name });
+          } catch (_) {
+            // chat problemático: ignora e segue
+          }
+        }
+        return out;
+      });
+      break;
+    } catch (err) {
+      console.warn(`[WA:${userId}] Tentativa ${i}/${EVALUATE_RETRIES} de listar grupos falhou:`, err.stack || err);
+      if (i === EVALUATE_RETRIES) throw err;
+      await new Promise((r) => setTimeout(r, 5000));
     }
-    return out;
-  });
+  }
 
   const found = groups.find((g) => g.name === groupName);
   if (!found) {

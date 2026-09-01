@@ -15,7 +15,10 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+# TEMPORARIO: usando npm install em vez de npm ci enquanto testamos a versao de
+# desenvolvimento do whatsapp-web.js (dependencia via GitHub, branch main).
+# Reverter para "npm ci --omit=dev" assim que voltarmos a usar uma versao fixa do NPM.
+RUN npm install --omit=dev
 
 COPY . .
 

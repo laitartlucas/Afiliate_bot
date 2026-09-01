@@ -21,6 +21,16 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS group_chat_cache (
+    user_id INTEGER NOT NULL,
+    group_name TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, group_name)
+  )
+`);
+
 function getUser(id) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
@@ -70,6 +80,33 @@ function isSubscriptionActive(user) {
   return new Date(user.subscription_expires_at) > new Date();
 }
 
+function getGroupChatCache(userId, groupName) {
+  return db
+    .prepare('SELECT chat_id FROM group_chat_cache WHERE user_id = ? AND group_name = ?')
+    .get(userId, groupName);
+}
+
+function setGroupChatCache(userId, groupName, chatId) {
+  db.prepare(
+    `INSERT OR REPLACE INTO group_chat_cache (user_id, group_name, chat_id, updated_at)
+     VALUES (?, ?, ?, datetime('now'))`
+  ).run(userId, groupName, chatId);
+}
+
+// Remove do cache os grupos do usuário que não estão mais em keepGroupNames,
+// para não acumular lixo quando o usuário troca o grupo de destino.
+function pruneGroupChatCache(userId, keepGroupNames) {
+  const names = keepGroupNames || [];
+  if (!names.length) {
+    db.prepare('DELETE FROM group_chat_cache WHERE user_id = ?').run(userId);
+    return;
+  }
+  const placeholders = names.map(() => '?').join(', ');
+  db.prepare(
+    `DELETE FROM group_chat_cache WHERE user_id = ? AND group_name NOT IN (${placeholders})`
+  ).run(userId, ...names);
+}
+
 module.exports = {
   getUser,
   getUserByUsername,
@@ -80,4 +117,7 @@ module.exports = {
   deleteUser,
   verifyPassword,
   isSubscriptionActive,
+  getGroupChatCache,
+  setGroupChatCache,
+  pruneGroupChatCache,
 };

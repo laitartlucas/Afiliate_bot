@@ -1,6 +1,7 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
+const { getGroupChatCache, setGroupChatCache, pruneGroupChatCache } = require('./database');
 
 const MAX_GROUPS = 20;
 // Intervalo entre envios para grupos diferentes, para reduzir o risco de
@@ -30,11 +31,32 @@ function setGroupNames(userId, names) {
   const state = getState(userId);
   state.groupNames = (names || []).slice(0, MAX_GROUPS);
   state.destChatIds = new Map();
+  pruneGroupChatCache(userId, state.groupNames);
 }
 
 async function resolveDestChatId(userId, groupName) {
   const state = getState(userId);
   if (state.destChatIds.has(groupName)) return state.destChatIds.get(groupName);
+
+  // Cache persistido no SQLite (sobrevive a restart do bot). Antes de
+  // confiar nele, validamos que o chat ainda existe/responde via
+  // getChatById() — bem mais barato que a varredura completa abaixo. Se
+  // falhar (grupo saiu, chat mudou, etc.), cai no fluxo normal de varredura.
+  const cached = getGroupChatCache(userId, groupName);
+  if (cached?.chat_id) {
+    try {
+      const chat = await state.client.getChatById(cached.chat_id);
+      if (chat) {
+        state.destChatIds.set(groupName, cached.chat_id);
+        return cached.chat_id;
+      }
+    } catch (err) {
+      console.warn(
+        `[WA:${userId}] Cache do banco para "${groupName}" (chat ${cached.chat_id}) não respondeu, refazendo varredura:`,
+        err.message
+      );
+    }
+  }
 
   // NÃO usamos client.getChats() aqui. Aquele método serializa TODOS os chats
   // e, para cada grupo, chama groupMetadata.update()/LidMigration. Se um único
@@ -87,6 +109,7 @@ async function resolveDestChatId(userId, groupName) {
     return null;
   }
   state.destChatIds.set(groupName, found.id);
+  setGroupChatCache(userId, groupName, found.id);
   return found.id;
 }
 

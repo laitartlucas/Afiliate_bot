@@ -1,3 +1,23 @@
+// Rede de segurança contra crash total do processo Node.
+//
+// A biblioteca whatsapp-web.js (via Puppeteer) pode lançar exceções não
+// capturadas ao processar eventos internos de uma conta específica — por
+// exemplo, ao lidar com um LOGOUT/desconexão. Sem esses handlers, esse erro
+// isolado derruba o processo inteiro e desconecta TODAS as contas, não só a
+// que teve o problema. O ideal a longo prazo é que a aplicação continue
+// rodando normalmente para as outras contas mesmo se uma delas falhar; até lá,
+// isso evita a queda total. Os logs abaixo são propositalmente bem visíveis
+// para permitir identificar se isso está ocorrendo com frequência e investigar
+// a causa raiz.
+process.on('uncaughtException', (err) => {
+  console.error('[CRASH PREVENIDO] uncaughtException:', err && err.stack ? err.stack : err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const stack = reason && reason.stack ? reason.stack : reason;
+  console.error('[CRASH PREVENIDO] unhandledRejection:', stack);
+});
+
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');

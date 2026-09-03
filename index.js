@@ -25,7 +25,7 @@ const path = require('path');
 const QRCode = require('qrcode');
 const db = require('./src/database');
 const { get: getSetting, set: setSetting } = require('./src/settings');
-const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, MAX_GROUPS } = require('./src/whatsapp');
+const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, MAX_GROUPS } = require('./src/whatsapp');
 const { scrapeProduct, scrapeShopeeProduct, scrapeAmazonProduct, downloadImage } = require('./src/scraper');
 const shopeeApi = require('./src/shopeeApi');
 const { generateSalesMessage } = require('./src/ai');
@@ -404,7 +404,42 @@ app.post('/api/amazon/process', requireAuth, requireActiveSubscription, async (r
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n[SERVER] Acesse http://localhost:${PORT}\n`);
   console.log(`[SERVER] Admin: usuário "admin", senha definida em ADMIN_PASSWORD\n`);
 });
+
+// Encerramento gracioso: SIGTERM (enviado pelo Docker ao reiniciar/atualizar o
+// container) e SIGINT (Ctrl+C) matavam o Chromium do Puppeteer de forma
+// abrupta, deixando para trás arquivos de trava (SingletonLock) e processos
+// zumbis. Aqui destruímos cada cliente WhatsApp explicitamente antes de sair,
+// com um timeout de segurança para não estourar o período de graça do Docker
+// (10s por padrão).
+let shuttingDown = false;
+
+async function gracefulShutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  console.log('[SHUTDOWN] Encerramento gracioso iniciado...');
+
+  const forceExitTimer = setTimeout(() => {
+    console.error('[SHUTDOWN] Timeout de 8s atingido, forçando encerramento.');
+    process.exit(0);
+  }, 8000);
+  forceExitTimer.unref();
+
+  try {
+    await Promise.all(getActiveUserIds().map((userId) => destroyClient(userId).catch(() => {})));
+    console.log('[SHUTDOWN] Todos os clientes encerrados.');
+  } catch (err) {
+    console.error('[SHUTDOWN] Erro ao encerrar clientes:', err && err.stack ? err.stack : err);
+  }
+
+  clearTimeout(forceExitTimer);
+  if (server) server.close();
+  process.exit(0);
+}
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

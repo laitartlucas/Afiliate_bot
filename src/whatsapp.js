@@ -277,4 +277,8 @@ async function destroyClient(userId) {
   clients.delete(userId);
 }
 
-module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, MAX_GROUPS };
+function getActiveUserIds() {
+  return Array.from(clients.keys());
+}
+
+module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, MAX_GROUPS };

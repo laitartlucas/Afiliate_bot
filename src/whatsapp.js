@@ -1,7 +1,48 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const path = require('path');
+const fs = require('fs');
 const { getGroupChatCache, setGroupChatCache, pruneGroupChatCache } = require('./database');
+
+const LOCK_FILE_NAMES = new Set(['SingletonLock', 'SingletonSocket', 'SingletonCookie']);
+
+// Como este deploy roda uma única instância do bot por container, qualquer
+// lock file do Chromium presente no início de uma inicialização é
+// necessariamente sobra de uma sessão anterior já encerrada (nunca de um
+// processo realmente concorrente) — logo é sempre seguro removê-lo antes de
+// iniciar. Isso evita o erro "profile appears to be in use by another
+// Chromium process" quando o destroy() de uma sessão anterior falha
+// silenciosamente ou não termina a tempo do processo principal encerrar.
+function cleanStaleLocks(userId) {
+  const sessionDir = path.join(process.cwd(), '.wwebjs_auth', `session-user-${userId}`);
+  if (!fs.existsSync(sessionDir)) return;
+
+  const stack = [sessionDir];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      console.warn(`[WA:${userId}] Não foi possível ler diretório "${dir}" ao limpar locks:`, err.message);
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (LOCK_FILE_NAMES.has(entry.name)) {
+        try {
+          fs.rmSync(entryPath, { force: true });
+          console.log(`[WA:${userId}] Lock file obsoleto removido: ${entryPath}`);
+        } catch (err) {
+          console.warn(`[WA:${userId}] Falha ao remover lock file "${entryPath}":`, err.message);
+        }
+      }
+    }
+  }
+}
 
 const MAX_GROUPS = 20;
 // Intervalo entre envios para grupos diferentes, para reduzir o risco de
@@ -187,6 +228,8 @@ async function initWhatsApp(userId, groupNames) {
   state.initializing = true;
   if (groupNames?.length) state.groupNames = groupNames.slice(0, MAX_GROUPS);
 
+  cleanStaleLocks(userId);
+
   const client = new Client({
     authStrategy: new LocalAuth({
       clientId: `user-${userId}`,
@@ -272,7 +315,12 @@ async function initWhatsApp(userId, groupNames) {
 async function destroyClient(userId) {
   const state = clients.get(userId);
   if (state?.client) {
-    try { await state.client.destroy(); } catch {}
+    try {
+      await state.client.destroy();
+      console.log(`[WA:${userId}] Cliente destruído com sucesso.`);
+    } catch (err) {
+      console.warn(`[WA:${userId}] Erro ao destruir cliente:`, err.message);
+    }
   }
   clients.delete(userId);
 }

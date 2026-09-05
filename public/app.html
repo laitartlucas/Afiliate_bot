@@ -171,6 +171,40 @@
       color: #555; font-size: 0.85rem; padding: 16px 0;
     }
 
+    /* ── Pairing code ── */
+    .pairing-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      color: #444;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .pairing-divider::before, .pairing-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #222;
+    }
+
+    .pairing-section { width: 100%; text-align: left; }
+
+    .pairing-code-display {
+      display: none;
+      margin-top: 12px;
+      background: #111;
+      border: 1px solid #25d36640;
+      border-radius: 10px;
+      padding: 14px 18px;
+      text-align: center;
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #25d366;
+    }
+
     /* ── Settings ── */
     .input-row { display: flex; gap: 10px; }
 
@@ -349,6 +383,21 @@
       <span><b>3.</b> <b>Conectar aparelho</b> → escaneie o QR</span>
     </div>
     <small style="color:#444; font-size:0.78rem">QR atualiza automaticamente a cada 30s</small>
+
+    <div class="pairing-divider">ou</div>
+
+    <div class="pairing-section">
+      <label for="pairing-phone">Conectar com número de telefone</label>
+      <div class="input-row">
+        <input type="text" id="pairing-phone" placeholder="Ex: 5511999999999 (código do país + DDD + número)" />
+        <button class="btn-outline" id="pairing-btn">Gerar código de pareamento</button>
+      </div>
+      <div class="save-feedback" id="pairing-feedback"></div>
+      <div class="pairing-code-display" id="pairing-code-display"></div>
+      <small style="color:#444; font-size:0.78rem; display:block; margin-top:8px">
+        No celular: <b>Aparelhos conectados</b> → <b>Conectar com número de telefone</b> → digite o código acima
+      </small>
+    </div>
   </div>
 </div>
 
@@ -449,6 +498,10 @@
   const qrLoading   = document.getElementById('qr-loading');
   const qrWrap      = document.getElementById('qr-wrap');
   const qrImg       = document.getElementById('qr-img');
+  const pairingPhone       = document.getElementById('pairing-phone');
+  const pairingBtn         = document.getElementById('pairing-btn');
+  const pairingFeedback    = document.getElementById('pairing-feedback');
+  const pairingCodeDisplay = document.getElementById('pairing-code-display');
   const sendCard    = document.getElementById('send-card');
   const shopeeCard  = document.getElementById('shopee-card');
   const amazonCard  = document.getElementById('amazon-card');
@@ -612,6 +665,46 @@
   setInterval(() => { if (!connected) loadQR(); }, 28000);
 
   checkStatus();
+
+  // ── Pairing code ──────────────────────────────────────────────────────────
+  pairingBtn.addEventListener('click', async () => {
+    const phoneNumber = pairingPhone.value.trim().replace(/\D/g, '');
+    pairingFeedback.style.display = 'none';
+    pairingCodeDisplay.style.display = 'none';
+    if (!phoneNumber) {
+      pairingFeedback.className = 'save-feedback error';
+      pairingFeedback.textContent = 'Digite o número de telefone.';
+      pairingFeedback.style.display = 'block';
+      return;
+    }
+
+    pairingBtn.disabled = true;
+    const originalLabel = pairingBtn.textContent;
+    pairingBtn.textContent = 'Gerando...';
+    try {
+      const res = await fetch('/api/whatsapp/pairing-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber }),
+      });
+      const data = await res.json();
+      if (res.ok && data.code) {
+        pairingCodeDisplay.textContent = data.code;
+        pairingCodeDisplay.style.display = 'block';
+      } else {
+        pairingFeedback.className = 'save-feedback error';
+        pairingFeedback.textContent = data.error || 'Erro ao gerar código de pareamento.';
+        pairingFeedback.style.display = 'block';
+      }
+    } catch {
+      pairingFeedback.className = 'save-feedback error';
+      pairingFeedback.textContent = 'Erro de conexão ao gerar código.';
+      pairingFeedback.style.display = 'block';
+    } finally {
+      pairingBtn.disabled = false;
+      pairingBtn.textContent = originalLabel;
+    }
+  });
 
   // ── Add group ─────────────────────────────────────────────────────────────
   saveBtn.addEventListener('click', async () => {

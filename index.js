@@ -25,7 +25,7 @@ const path = require('path');
 const QRCode = require('qrcode');
 const db = require('./src/database');
 const { get: getSetting, set: setSetting } = require('./src/settings');
-const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, MAX_GROUPS } = require('./src/whatsapp');
+const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, MAX_GROUPS } = require('./src/whatsapp');
 const { scrapeProduct, scrapeShopeeProduct, scrapeAmazonProduct, downloadImage } = require('./src/scraper');
 const shopeeApi = require('./src/shopeeApi');
 const { generateSalesMessage } = require('./src/ai');
@@ -235,6 +235,21 @@ app.get('/api/qr', requireAuth, async (req, res) => {
     width: 260, margin: 2, color: { dark: '#000', light: '#fff' },
   });
   res.json({ qr: dataUrl });
+});
+
+app.post('/api/whatsapp/pairing-code', requireAuth, async (req, res) => {
+  if (req.session.isAdmin) return res.status(403).json({ error: 'Admin não usa o bot' });
+  const userId = req.session.userId;
+  const phoneNumber = req.body.phoneNumber?.trim();
+  if (!phoneNumber) return res.status(400).json({ error: 'Número de telefone é obrigatório' });
+
+  try {
+    const code = await requestPairingCode(userId, phoneNumber);
+    res.json({ code });
+  } catch (err) {
+    console.error(`[WA:${userId}] Erro ao gerar código de pareamento:`, err.message);
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/settings/groups', requireAuth, (req, res) => {

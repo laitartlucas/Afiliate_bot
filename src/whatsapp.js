@@ -312,6 +312,41 @@ async function initWhatsApp(userId, groupNames) {
   });
 }
 
+// Gera um código de pareamento (ex: "ABCD-1234") como alternativa ao QR code
+// para vincular o WhatsApp. Útil porque é um fluxo diferente do QR e às vezes
+// funciona mesmo quando o WhatsApp está temporariamente bloqueando aquele.
+async function requestPairingCode(userId, phoneNumber) {
+  const digits = (phoneNumber || '').replace(/\D/g, '');
+  if (!digits || digits.length < 10 || digits.length > 15) {
+    throw new Error('Número de telefone inválido. Use o formato internacional sem símbolos, ex: 5511999999999');
+  }
+
+  const state = getState(userId);
+  if (state.ready) throw new Error('WhatsApp já está conectado.');
+
+  if (!state.client && !state.initializing) {
+    await initWhatsApp(userId);
+  }
+
+  // requestPairingCode só funciona depois que a página do WhatsApp Web
+  // carrega até o ponto de gerar QR — o mesmo estágio sinalizado pelo
+  // evento 'qr'. Se o client acabou de ser criado, aguardamos até esse
+  // ponto (ou até ficar pronto, no caso de sessão já autenticada em disco).
+  const WAIT_RETRIES = 15;
+  const WAIT_DELAY_MS = 2000;
+  for (let i = 1; i <= WAIT_RETRIES; i++) {
+    if (state.client && (state.qr || state.ready)) break;
+    if (i === WAIT_RETRIES) throw new Error('WhatsApp não ficou pronto para gerar o código de pareamento a tempo.');
+    await new Promise((r) => setTimeout(r, WAIT_DELAY_MS));
+  }
+
+  if (state.ready) throw new Error('WhatsApp já está conectado.');
+
+  const code = await state.client.requestPairingCode(digits);
+  console.log(`[WA:${userId}] Código de pareamento gerado.`);
+  return code;
+}
+
 async function destroyClient(userId) {
   const state = clients.get(userId);
   if (state?.client) {
@@ -329,4 +364,4 @@ function getActiveUserIds() {
   return Array.from(clients.keys());
 }
 
-module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, MAX_GROUPS };
+module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, MAX_GROUPS };

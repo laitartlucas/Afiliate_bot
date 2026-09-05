@@ -260,6 +260,13 @@ async function initWhatsApp(userId, groupNames) {
         '--disable-sync',
         '--no-first-run',
         '--memory-pressure-off',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-ipc-flooding-protection',
+        '--disable-software-rasterizer',
+        '--mute-audio',
+        '--disable-default-apps',
+        '--metrics-recording-only',
       ],
     },
   });

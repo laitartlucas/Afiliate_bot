@@ -67,6 +67,7 @@ function getState(userId) {
 function isReady(userId) { return getState(userId).ready; }
 function getQR(userId) { return getState(userId).qr; }
 function isInitializing(userId) { const s = getState(userId); return s.initializing || !!s.client; }
+function getClient(userId) { return getState(userId).client; }
 
 function setGroupNames(userId, names) {
   const state = getState(userId);
@@ -364,4 +365,4 @@ function getActiveUserIds() {
   return Array.from(clients.keys());
 }
 
-module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, MAX_GROUPS };
+module.exports = { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, getClient, MAX_GROUPS };

@@ -25,7 +25,7 @@ const path = require('path');
 const QRCode = require('qrcode');
 const db = require('./src/database');
 const { get: getSetting, set: setSetting } = require('./src/settings');
-const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, MAX_GROUPS } = require('./src/whatsapp');
+const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, getClient, MAX_GROUPS } = require('./src/whatsapp');
 const { scrapeProduct, scrapeShopeeProduct, scrapeAmazonProduct, downloadImage } = require('./src/scraper');
 const shopeeApi = require('./src/shopeeApi');
 const { generateSalesMessage } = require('./src/ai');
@@ -249,6 +249,29 @@ app.post('/api/whatsapp/pairing-code', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(`[WA:${userId}] Erro ao gerar código de pareamento:`, err.message);
     res.status(400).json({ error: err.message });
+  }
+});
+
+// TEMPORÁRIO - remover depois do diagnóstico. Envia uma mensagem direta para
+// um número (fora do fluxo de grupos), retornando o retorno bruto de
+// sendMessage() para inspecionar campos como "ack".
+app.post('/api/debug/send-direct', requireAuth, async (req, res) => {
+  if (req.session.isAdmin) return res.status(403).json({ error: 'Admin não usa o bot' });
+  const userId = req.session.userId;
+  const { phoneNumber, message } = req.body;
+  if (!phoneNumber || !message) {
+    return res.status(400).json({ error: 'phoneNumber e message são obrigatórios' });
+  }
+
+  const client = getClient(userId);
+  if (!client) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
+
+  try {
+    const chatId = `${phoneNumber}@c.us`;
+    const result = await client.sendMessage(chatId, message);
+    res.json({ chatId, result });
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message, stack: err.stack } });
   }
 });
 

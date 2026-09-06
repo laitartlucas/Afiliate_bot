@@ -40,6 +40,61 @@ services:
     networks:
       - internal
 
+  # --- Infraestrutura para futura migração de whatsapp-web.js -> Evolution API ---
+  # Ainda não usados pelo bot (src/whatsapp.js continua com whatsapp-web.js).
+  # Sobem isolados aqui só para validar a stack antes de migrar o código.
+  postgres:
+    image: postgres:15
+    container_name: afiliate-bot-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: afiliate-bot-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    container_name: afiliate-bot-evolution-api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - .env
+    environment:
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+    # Não publica a porta no host — só o container do bot vai falar com a
+    # Evolution API, pela rede interna do compose (afiliate-bot-evolution-api:8080).
+    expose:
+      - "8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - internal
+
 networks:
   internal:
     driver: bridge
@@ -49,3 +104,6 @@ volumes:
   # (e não bater em rate limit) a cada `docker compose up`.
   caddy_data:
   caddy_config:
+  postgres_data:
+  redis_data:
+  evolution_instances:

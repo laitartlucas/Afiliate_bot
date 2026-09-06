@@ -66,7 +66,10 @@ async function getConnectionState(instanceName) {
 }
 
 async function fetchAllGroups(instanceName) {
-  const res = await api.get(`/group/fetchAllGroups/${instanceName}`, { params: { getParticipants: false } });
+  // Timeout maior que o padrão do axios (30s): a Evolution API/Baileys pode
+  // demorar mais que isso para montar a lista completa de grupos, sobretudo
+  // logo após a conexão inicial ou em contas com muitos grupos.
+  const res = await api.get(`/group/fetchAllGroups/${instanceName}`, { params: { getParticipants: false }, timeout: 90000 });
   return Array.isArray(res.data) ? res.data : [];
 }
 

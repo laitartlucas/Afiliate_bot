@@ -1,14 +1,12 @@
 // Rede de segurança contra crash total do processo Node.
 //
-// A biblioteca whatsapp-web.js (via Puppeteer) pode lançar exceções não
-// capturadas ao processar eventos internos de uma conta específica — por
-// exemplo, ao lidar com um LOGOUT/desconexão. Sem esses handlers, esse erro
-// isolado derruba o processo inteiro e desconecta TODAS as contas, não só a
-// que teve o problema. O ideal a longo prazo é que a aplicação continue
-// rodando normalmente para as outras contas mesmo se uma delas falhar; até lá,
-// isso evita a queda total. Os logs abaixo são propositalmente bem visíveis
-// para permitir identificar se isso está ocorrendo com frequência e investigar
-// a causa raiz.
+// Uma exceção não capturada ao processar algo isolado de uma conta específica
+// (ex: scraping, chamada à Evolution API) derrubaria o processo inteiro e
+// desconectaria TODAS as contas, não só a que teve o problema. O ideal a longo
+// prazo é que a aplicação continue rodando normalmente para as outras contas
+// mesmo se uma delas falhar; até lá, isso evita a queda total. Os logs abaixo
+// são propositalmente bem visíveis para permitir identificar se isso está
+// ocorrendo com frequência e investigar a causa raiz.
 process.on('uncaughtException', (err) => {
   console.error('[CRASH PREVENIDO] uncaughtException:', err && err.stack ? err.stack : err);
 });
@@ -22,7 +20,6 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
-const QRCode = require('qrcode');
 const db = require('./src/database');
 const { get: getSetting, set: setSetting } = require('./src/settings');
 const { initWhatsApp, sendToGroups, isReady, getQR, isInitializing, setGroupNames, destroyClient, getActiveUserIds, requestPairingCode, MAX_GROUPS } = require('./src/whatsapp');
@@ -201,7 +198,7 @@ app.post('/api/logout', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/status', requireAuth, (req, res) => {
+app.get('/api/status', requireAuth, async (req, res) => {
   if (req.session.isAdmin) return res.status(403).json({ error: 'Admin não usa o bot' });
 
   const userId = req.session.userId;
@@ -217,7 +214,7 @@ app.get('/api/status', requireAuth, (req, res) => {
   }
 
   res.json({
-    ready: isReady(userId),
+    ready: await isReady(userId),
     hasQR: !!getQR(userId),
     groups,
     maxGroups: MAX_GROUPS,
@@ -229,12 +226,10 @@ app.get('/api/status', requireAuth, (req, res) => {
 
 app.get('/api/qr', requireAuth, async (req, res) => {
   if (req.session.isAdmin) return res.json({ qr: null });
-  const qrString = getQR(req.session.userId);
-  if (!qrString) return res.json({ qr: null });
-  const dataUrl = await QRCode.toDataURL(qrString, {
-    width: 260, margin: 2, color: { dark: '#000', light: '#fff' },
-  });
-  res.json({ qr: dataUrl });
+  // A Evolution API já retorna o QR pronto como data URI (imagem base64) —
+  // diferente do whatsapp-web.js, que emitia a string crua do QR e exigia
+  // renderizá-la em imagem aqui (QRCode.toDataURL).
+  res.json({ qr: getQR(req.session.userId) || null });
 });
 
 app.post('/api/whatsapp/pairing-code', requireAuth, async (req, res) => {
@@ -284,7 +279,7 @@ app.post('/api/process', requireAuth, requireActiveSubscription, async (req, res
   const userId = req.session.userId;
   const { url, coupon } = req.body;
   if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
-  if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
+  if (!(await isReady(userId))) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
   if (!getGroups(userId).length) return res.status(400).json({ error: 'Adicione ao menos um grupo antes de enviar.' });
 
   try {
@@ -316,7 +311,7 @@ app.post('/api/shopee/process', requireAuth, requireActiveSubscription, async (r
   const { url, title, currentPrice, originalPrice, discountPercent, imageUrl, coupon } = req.body;
 
   if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
-  if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
+  if (!(await isReady(userId))) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
   if (!getGroups(userId).length) return res.status(400).json({ error: 'Adicione ao menos um grupo antes de enviar.' });
 
   let product;
@@ -368,7 +363,7 @@ app.post('/api/amazon/process', requireAuth, requireActiveSubscription, async (r
   const { url, title, currentPrice, originalPrice, discountPercent, imageUrl, coupon } = req.body;
 
   if (!url?.trim()) return res.status(400).json({ error: 'URL é obrigatória' });
-  if (!isReady(userId)) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
+  if (!(await isReady(userId))) return res.status(503).json({ error: 'WhatsApp não está conectado ainda.' });
   if (!getGroups(userId).length) return res.status(400).json({ error: 'Adicione ao menos um grupo antes de enviar.' });
 
   let product;

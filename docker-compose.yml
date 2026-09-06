@@ -5,20 +5,21 @@ services:
       dockerfile: Dockerfile
     container_name: afiliate-bot
     restart: unless-stopped
+    depends_on:
+      - evolution-api
     env_file:
       - .env
     # Não publica a porta no host — só fica acessível para o Caddy via rede
     # interna do compose. O acesso externo passa sempre pelo proxy reverso.
     expose:
       - "3000"
-    # Chromium (Puppeteer) é o principal consumidor de memória do container.
-    # 1.5GB costuma ser suficiente para uma sessão do WhatsApp Web; ajuste
-    # conforme o VPS. Abaixo de ~1GB o Chromium tende a crashar sob carga.
+    # Chromium (Puppeteer) agora só é usado sob demanda pelo scraping de
+    # produtos (Shopee/Amazon) em src/scraper.js — o WhatsApp passou a usar a
+    # Evolution API (sem Chromium). 1.5GB segue como margem segura, mas pode
+    # ser reduzido depois de observar o consumo real em produção.
     mem_limit: 1536m
     volumes:
       - ./data:/app/data
-      - ./.wwebjs_auth:/app/.wwebjs_auth
-      - ./.wwebjs_cache:/app/.wwebjs_cache
     networks:
       - internal
 

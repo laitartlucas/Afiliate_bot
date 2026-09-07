@@ -65,12 +65,42 @@ async function getConnectionState(instanceName) {
   return res.data?.instance?.state;
 }
 
+const CONN_CHECK_RETRIES = 3;
+const CONN_CHECK_DELAY_MS = 3000;
+
+// Consulta o estado de conexão com retry. Em um "docker compose restart"/"up"
+// a Evolution API sobe junto com o bot e pode levar alguns segundos para
+// recarregar na própria memória as instâncias já persistidas (Postgres). Uma
+// consulta imediata pode falhar nessa janela (erro de rede/timeout, ou até
+// um 404 dizendo que a instância não existe) para uma instância que na
+// verdade já está conectada. Repetir algumas vezes evita tratar isso como
+// falso negativo. Retorna { state } em caso de sucesso ou { error } se todas
+// as tentativas falharem.
+async function getConnectionStateWithRetry(instanceName, retries = CONN_CHECK_RETRIES) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      return { state: await getConnectionState(instanceName) };
+    } catch (err) {
+      if (i === retries) return { error: err };
+      console.warn(
+        `[WA] Tentativa ${i}/${retries} de consultar connectionState de "${instanceName}" falhou, tentando de novo em ${CONN_CHECK_DELAY_MS / 1000}s:`,
+        err.response?.data || err.message
+      );
+      await new Promise((r) => setTimeout(r, CONN_CHECK_DELAY_MS));
+    }
+  }
+}
+
 async function fetchAllGroups(instanceName) {
-  // Timeout bem maior que o padrão do axios (30s): a Evolution API processa
-  // cada grupo individualmente na primeira varredura, e contas com muitos
-  // grupos podem passar de 90s. Isso é só uma rede de segurança para essa
-  // operação pesada específica — o caminho normal (resolveGroupId) evita
-  // chamar isso de novo usando o cache do banco.
+  // Timeout bem maior que o padrão do axios (30s): internamente a Evolution
+  // API busca a lista de grupos do Baileys (rápido, já sincronizado) mas
+  // depois faz uma chamada de rede SEQUENCIAL ao WhatsApp por grupo só para
+  // buscar a foto de perfil — getParticipants:false só reduz o tamanho da
+  // resposta (omite a lista de participantes), não corta esse loop por
+  // grupo. Contas com muitos grupos podem passar de 90s por causa disso.
+  // Isso é só uma rede de segurança para essa operação pesada específica —
+  // o caminho normal (resolveGroupId) evita chamar isso de novo usando o
+  // cache do banco.
   const res = await api.get(`/group/fetchAllGroups/${instanceName}`, { params: { getParticipants: false }, timeout: 240000 });
   return Array.isArray(res.data) ? res.data : [];
 }
@@ -160,7 +190,7 @@ async function resolveGroupId(userId, groupName) {
   if (cached?.chat_id) {
     try {
       const info = await findGroupInfo(state.instanceName, cached.chat_id);
-      if (info?.group?.id) {
+      if (info?.id) {
         state.destGroupIds.set(groupName, cached.chat_id);
         console.log(`[WA:${userId}] Grupo "${groupName}" resolvido via cache`);
         return cached.chat_id;
@@ -176,17 +206,31 @@ async function resolveGroupId(userId, groupName) {
   const scanStart = Date.now();
   const groups = await trySend(() => fetchAllGroups(state.instanceName));
   const scanMs = Date.now() - scanStart;
-  const target = normalizeName(groupName);
-  const found = groups.find((g) => normalizeName(g.subject) === target);
-  if (!found) {
+
+  // fetchAllGroups é cara independente de quantos grupos precisamos resolver
+  // (a Evolution API busca o metadata completo de TODOS os grupos numa
+  // varredura só). Por isso, aproveitamos o resultado para cachear de uma
+  // vez TODOS os grupos configurados que aparecerem nele — não só o
+  // solicitado — assim resolver os próximos grupos da mesma leva de envio
+  // (sendToGroups) não dispara uma nova varredura pesada para cada um.
+  const byNormalizedName = new Map(groups.map((g) => [normalizeName(g.subject), g]));
+  for (const name of state.groupNames) {
+    if (state.destGroupIds.has(name)) continue;
+    const match = byNormalizedName.get(normalizeName(name));
+    if (match) {
+      state.destGroupIds.set(name, match.id);
+      setGroupChatCache(userId, name, match.id);
+    }
+  }
+
+  const foundId = state.destGroupIds.get(groupName);
+  if (!foundId) {
     const visiveis = groups.map((g) => g.subject).filter(Boolean).join(', ') || 'nenhum';
     console.warn(`[WA:${userId}] Grupo "${groupName}" não encontrado (grupos visíveis: ${visiveis})`);
     return null;
   }
-  state.destGroupIds.set(groupName, found.id);
-  setGroupChatCache(userId, groupName, found.id);
   console.log(`[WA:${userId}] Grupo "${groupName}" resolvido via varredura completa (${scanMs}ms)`);
-  return found.id;
+  return foundId;
 }
 
 // Envia a mesma mensagem para todos os grupos configurados, com um intervalo
@@ -243,6 +287,34 @@ async function initWhatsApp(userId, groupNames) {
 
   state.initializing = true;
   try {
+    // Antes de rodar create+connect (que pode gerar um QR code novo),
+    // confirma se a instância já está conectada — ex: o bot reiniciou mas a
+    // sessão do WhatsApp continua ativa do lado da Evolution API. Sem essa
+    // checagem, todo restart do bot dispararia o fluxo de criação/QR de novo
+    // para uma sessão que já está funcionando (o estado em memória `created`
+    // sempre volta a `false` num restart).
+    const check = await getConnectionStateWithRetry(state.instanceName);
+    if (check.state === 'open') {
+      state.created = true;
+      state.ready = true;
+      state.qr = null;
+      console.log(`[WA:${userId}] Instância "${state.instanceName}" já estava conectada — QR não é necessário.`);
+      return;
+    }
+    if (check.error && !check.error.response) {
+      // Erro de rede/timeout, não uma resposta confirmada da API — não temos
+      // como saber o estado real da instância agora. Não arriscamos recriá-la;
+      // a próxima chamada a initWhatsApp (próximo /api/status) tenta de novo.
+      console.warn(
+        `[WA:${userId}] Não foi possível confirmar o estado da instância (erro de rede), adiando inicialização:`,
+        check.error.message
+      );
+      return;
+    }
+    // Chegou aqui porque a API respondeu com clareza (não foi erro de rede)
+    // que a instância não existe ou não está com o estado "open" — segue o
+    // fluxo normal de criação/QR.
+
     await createInstance(state.instanceName);
     state.created = true;
     try {

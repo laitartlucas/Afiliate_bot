@@ -66,10 +66,12 @@ async function getConnectionState(instanceName) {
 }
 
 async function fetchAllGroups(instanceName) {
-  // Timeout maior que o padrão do axios (30s): a Evolution API/Baileys pode
-  // demorar mais que isso para montar a lista completa de grupos, sobretudo
-  // logo após a conexão inicial ou em contas com muitos grupos.
-  const res = await api.get(`/group/fetchAllGroups/${instanceName}`, { params: { getParticipants: false }, timeout: 90000 });
+  // Timeout bem maior que o padrão do axios (30s): a Evolution API processa
+  // cada grupo individualmente na primeira varredura, e contas com muitos
+  // grupos podem passar de 90s. Isso é só uma rede de segurança para essa
+  // operação pesada específica — o caminho normal (resolveGroupId) evita
+  // chamar isso de novo usando o cache do banco.
+  const res = await api.get(`/group/fetchAllGroups/${instanceName}`, { params: { getParticipants: false }, timeout: 240000 });
   return Array.isArray(res.data) ? res.data : [];
 }
 
@@ -160,6 +162,7 @@ async function resolveGroupId(userId, groupName) {
       const info = await findGroupInfo(state.instanceName, cached.chat_id);
       if (info?.group?.id) {
         state.destGroupIds.set(groupName, cached.chat_id);
+        console.log(`[WA:${userId}] Grupo "${groupName}" resolvido via cache`);
         return cached.chat_id;
       }
     } catch (err) {
@@ -170,7 +173,9 @@ async function resolveGroupId(userId, groupName) {
     }
   }
 
+  const scanStart = Date.now();
   const groups = await trySend(() => fetchAllGroups(state.instanceName));
+  const scanMs = Date.now() - scanStart;
   const target = normalizeName(groupName);
   const found = groups.find((g) => normalizeName(g.subject) === target);
   if (!found) {
@@ -180,6 +185,7 @@ async function resolveGroupId(userId, groupName) {
   }
   state.destGroupIds.set(groupName, found.id);
   setGroupChatCache(userId, groupName, found.id);
+  console.log(`[WA:${userId}] Grupo "${groupName}" resolvido via varredura completa (${scanMs}ms)`);
   return found.id;
 }
 

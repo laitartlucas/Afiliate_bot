@@ -140,7 +140,7 @@ async function scrapeProduct(originalUrl) {
     });
   }
 
-  return { title, currentPrice, originalPrice, discountPercent, imageUrl, features: features.slice(0, 8), url: originalUrl };
+  return { title, currentPrice, originalPrice, discountPercent, imageUrl, features: features.slice(0, 8), url };
 }
 
 // ── Navegador headless compartilhado ────────────────────────────────────────
